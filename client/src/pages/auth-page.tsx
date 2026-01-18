@@ -41,7 +41,6 @@ const MospiLogo = ({ className }: { className?: string }) => (
       src="https://www.mospi.gov.in/uploads/primaryLogo/primaryLogo-1dee0dd9-99fd-4b8f-a352-7a53e0655404.svg" 
       alt="MoSPI Logo" 
       className="h-full w-full object-contain"
-      crossOrigin="anonymous"
       onError={(e) => {
         const target = e.target as HTMLImageElement;
         target.onerror = null;
