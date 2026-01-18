@@ -88,10 +88,10 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <header className="w-full bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 py-4 px-8">
+      <header className="relative z-50 w-full bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 py-4 px-8">
         <div className="flex items-center justify-between w-full gap-8 overflow-visible">
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <MospiLogo className="h-16 w-16 min-w-[64px]" />
+            <MospiLogo className="h-20 w-auto min-w-[80px]" />
             <div className="flex flex-col">
               <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight font-sans uppercase">GOVERNMENT OF INDIA</span>
               <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Ministry of Statistics and</span>
@@ -100,7 +100,7 @@ export default function AuthPage() {
           </div>
 
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <img src={moeLogo} alt="MoE" className="h-16 w-auto object-contain min-w-[64px]" />
+            <img src="https://www.education.gov.in/sites/all/themes/moe/images/logo.png" alt="MoE" className="h-20 w-auto object-contain min-w-[80px]" />
             <div className="flex flex-col">
               <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight font-sans uppercase">GOVERNMENT OF INDIA</span>
               <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Ministry of Education</span>
@@ -108,17 +108,17 @@ export default function AuthPage() {
           </div>
 
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <img src={innovationCellLogo} alt="Innovation Cell" className="h-16 w-auto object-contain min-w-[120px]" />
+            <img src={innovationCellLogo} alt="Innovation Cell" className="h-20 w-auto object-contain min-w-[140px]" />
           </div>
 
           <div className="flex-1 flex items-center justify-center overflow-visible">
-            <img src={statathonLogo} alt="Statathon 2025" className="h-16 w-auto object-contain min-w-[64px]" />
+            <img src={statathonLogo} alt="Statathon 2025" className="h-20 w-auto object-contain min-w-[80px]" />
           </div>
         </div>
       </header>
 
       <div className="flex-1 flex flex-col lg:flex-row h-full">
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white dark:bg-slate-900 -mt-24">
+        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white dark:bg-slate-900">
           <div className="w-full max-w-md space-y-8">
             <div className="text-center space-y-4">
               <div className="flex flex-col items-center justify-center gap-4">

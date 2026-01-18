@@ -68,7 +68,7 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
 
                 <div className="flex items-center gap-6 border-r border-slate-200 dark:border-slate-800 pr-8 h-full overflow-visible">
                   <div className="flex items-center gap-3">
-                    <img src={moeLogo} alt="MoE Logo" className="h-14 w-auto object-contain min-w-[56px]" />
+                    <img src="https://www.education.gov.in/sites/all/themes/moe/images/logo.png" alt="MoE Logo" className="h-14 w-auto object-contain min-w-[56px]" />
                     <div className="flex flex-col">
                       <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight uppercase">GOVERNMENT OF INDIA</span>
                       <span className="text-[13px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Ministry of Education</span>
