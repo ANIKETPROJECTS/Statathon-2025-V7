@@ -18,6 +18,22 @@ import moeLogo from "@assets/moe_logo.png";
 import statathonLogo from "@assets/statathon_logo.png";
 import innovationCellLogo from "@assets/innovation_cell_logo.png";
 
+const MospiLogo = ({ className }: { className?: string }) => (
+  <div className={className}>
+    <img 
+      src="https://www.mospi.gov.in/uploads/primaryLogo/primaryLogo-1dee0dd9-99fd-4b8f-a352-7a53e0655404.svg" 
+      alt="MoSPI Logo" 
+      className="h-full w-full object-contain"
+      crossOrigin="anonymous"
+      onError={(e) => {
+        const target = e.target as HTMLImageElement;
+        target.onerror = null;
+        target.src = "https://www.mospi.gov.in/themes/mospi/images/logo.png";
+      }}
+    />
+  </div>
+);
+
 interface DashboardLayoutProps {
   children: ReactNode;
   title: string;
@@ -30,22 +46,19 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
     "--sidebar-width-icon": "3.5rem",
   } as React.CSSProperties;
 
-  const mospiLogoUrl = "https://www.mospi.gov.in/uploads/primaryLogo/primaryLogo-1dee0dd9-99fd-4b8f-a352-7a53e0655404.svg";
-
   return (
     <SidebarProvider style={sidebarStyle}>
       <div className="flex min-h-screen w-full">
         <AppSidebar />
         <SidebarInset className="flex flex-col flex-1">
           <header className="sticky top-0 z-50 flex h-24 items-center gap-4 border-b bg-white dark:bg-slate-900 px-6">
-            <div className="flex items-center gap-4 flex-1 h-full py-2">
+            <div className="flex items-center gap-4 flex-1 h-full py-2 overflow-visible">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
               <Separator orientation="vertical" className="h-10" />
               
-              <div className="flex items-center gap-8 h-full">
-                {/* Section 1: MoSPI */}
-                <div className="flex items-center gap-3 border-r border-slate-200 dark:border-slate-800 pr-8 h-full">
-                  <img src={mospiLogoUrl} alt="MoSPI Logo" className="h-14 w-auto object-contain" />
+              <div className="flex items-center gap-8 h-full overflow-visible">
+                <div className="flex items-center gap-3 border-r border-slate-200 dark:border-slate-800 pr-8 h-full overflow-visible">
+                  <MospiLogo className="h-14 w-14 min-w-[56px]" />
                   <div className="flex flex-col">
                     <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight uppercase">GOVERNMENT OF INDIA</span>
                     <span className="text-[13px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Ministry of Statistics and</span>
@@ -53,22 +66,20 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
                   </div>
                 </div>
 
-                {/* Section 2: MoE & Innovation Cell */}
-                <div className="flex items-center gap-6 border-r border-slate-200 dark:border-slate-800 pr-8 h-full">
+                <div className="flex items-center gap-6 border-r border-slate-200 dark:border-slate-800 pr-8 h-full overflow-visible">
                   <div className="flex items-center gap-3">
-                    <img src={moeLogo} alt="MoE Logo" className="h-14 w-auto object-contain" />
+                    <img src={moeLogo} alt="MoE Logo" className="h-14 w-auto object-contain min-w-[56px]" />
                     <div className="flex flex-col">
                       <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight uppercase">GOVERNMENT OF INDIA</span>
                       <span className="text-[13px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Ministry of Education</span>
                     </div>
                   </div>
                   <div className="h-10 w-px bg-slate-200 dark:bg-slate-800" />
-                  <img src={innovationCellLogo} alt="Innovation Cell" className="h-14 w-auto object-contain" />
+                  <img src={innovationCellLogo} alt="Innovation Cell" className="h-14 w-auto object-contain min-w-[100px]" />
                 </div>
 
-                {/* Section 3: Statathon */}
-                <div className="flex items-center gap-2 h-full">
-                  <img src={statathonLogo} alt="Statathon Logo" className="h-14 w-auto object-contain" />
+                <div className="flex items-center gap-2 h-full overflow-visible">
+                  <img src={statathonLogo} alt="Statathon Logo" className="h-14 w-auto object-contain min-w-[56px]" />
                 </div>
               </div>
             </div>
@@ -84,24 +95,15 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
 
           <main className="flex-1 overflow-auto p-6">
             <div className="mb-6 flex items-center justify-between">
-              <h1 className="text-2xl font-bold" data-testid={`heading-${title.toLowerCase().replace(/\s+/g, "-")}`}>
-                {title}
-              </h1>
-              
+              <h1 className="text-2xl font-bold" data-testid={`heading-${title.toLowerCase().replace(/\s+/g, "-")}`}>{title}</h1>
               <Breadcrumb>
                 <BreadcrumbList>
-                  <BreadcrumbItem>
-                    <BreadcrumbLink href="/">Home</BreadcrumbLink>
-                  </BreadcrumbItem>
+                  <BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem>
                   {breadcrumbs.length > 0 && <BreadcrumbSeparator />}
                   {breadcrumbs.map((crumb, index) => [
                     index > 0 ? <BreadcrumbSeparator key={`sep-${index}`} /> : null,
                     <BreadcrumbItem key={`item-${index}`}>
-                      {crumb.href ? (
-                        <BreadcrumbLink href={crumb.href}>{crumb.label}</BreadcrumbLink>
-                      ) : (
-                        <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
-                      )}
+                      {crumb.href ? <BreadcrumbLink href={crumb.href}>{crumb.label}</BreadcrumbLink> : <BreadcrumbPage>{crumb.label}</BreadcrumbPage>}
                     </BreadcrumbItem>
                   ]).flat()}
                 </BreadcrumbList>

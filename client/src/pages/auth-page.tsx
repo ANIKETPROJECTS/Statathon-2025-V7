@@ -35,12 +35,26 @@ const registerSchema = z.object({
 type LoginFormData = z.infer<typeof loginSchema>;
 type RegisterFormData = z.infer<typeof registerSchema>;
 
+const MospiLogo = ({ className }: { className?: string }) => (
+  <div className={className}>
+    <img 
+      src="https://www.mospi.gov.in/uploads/primaryLogo/primaryLogo-1dee0dd9-99fd-4b8f-a352-7a53e0655404.svg" 
+      alt="MoSPI Logo" 
+      className="h-full w-full object-contain"
+      crossOrigin="anonymous"
+      onError={(e) => {
+        const target = e.target as HTMLImageElement;
+        target.onerror = null;
+        target.src = "https://www.mospi.gov.in/themes/mospi/images/logo.png";
+      }}
+    />
+  </div>
+);
+
 export default function AuthPage() {
   const [, setLocation] = useLocation();
   const { user, loginMutation, registerMutation } = useAuth();
   const [activeTab, setActiveTab] = useState("login");
-
-  const mospiLogoUrl = "https://www.mospi.gov.in/uploads/primaryLogo/primaryLogo-1dee0dd9-99fd-4b8f-a352-7a53e0655404.svg";
 
   const loginForm = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -74,12 +88,10 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      {/* Header with 4 Balanced Sections */}
       <header className="w-full bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 py-4 px-8">
-        <div className="flex items-center justify-between w-full gap-8">
-          {/* Section 1: MoSPI */}
-          <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8">
-            <img src={mospiLogoUrl} alt="MoSPI" className="h-16 w-auto object-contain" />
+        <div className="flex items-center justify-between w-full gap-8 overflow-visible">
+          <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
+            <MospiLogo className="h-16 w-16 min-w-[64px]" />
             <div className="flex flex-col">
               <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight font-sans uppercase">GOVERNMENT OF INDIA</span>
               <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Ministry of Statistics and</span>
@@ -87,23 +99,20 @@ export default function AuthPage() {
             </div>
           </div>
 
-          {/* Section 2: Ministry of Education */}
-          <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8">
-            <img src={moeLogo} alt="MoE" className="h-16 w-auto object-contain" />
+          <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
+            <img src={moeLogo} alt="MoE" className="h-16 w-auto object-contain min-w-[64px]" />
             <div className="flex flex-col">
               <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight font-sans uppercase">GOVERNMENT OF INDIA</span>
               <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Ministry of Education</span>
             </div>
           </div>
 
-          {/* Section 3: Innovation Cell */}
-          <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8">
-            <img src={innovationCellLogo} alt="Innovation Cell" className="h-16 w-auto object-contain" />
+          <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
+            <img src={innovationCellLogo} alt="Innovation Cell" className="h-16 w-auto object-contain min-w-[120px]" />
           </div>
 
-          {/* Section 4: Statathon */}
-          <div className="flex-1 flex items-center justify-center">
-            <img src={statathonLogo} alt="Statathon 2025" className="h-16 w-auto object-contain" />
+          <div className="flex-1 flex items-center justify-center overflow-visible">
+            <img src={statathonLogo} alt="Statathon 2025" className="h-16 w-auto object-contain min-w-[64px]" />
           </div>
         </div>
       </header>
@@ -121,20 +130,8 @@ export default function AuthPage() {
             <div className="bg-white dark:bg-slate-900 p-2">
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="grid w-full grid-cols-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-                  <TabsTrigger 
-                    value="login" 
-                    data-testid="tab-login"
-                    className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 shadow-sm transition-all"
-                  >
-                    Login
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="register" 
-                    data-testid="tab-register"
-                    className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 shadow-sm transition-all"
-                  >
-                    Register
-                  </TabsTrigger>
+                  <TabsTrigger value="login" className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700">Login</TabsTrigger>
+                  <TabsTrigger value="register" className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700">Register</TabsTrigger>
                 </TabsList>
                 
                 <TabsContent value="login" className="mt-6">
@@ -145,15 +142,8 @@ export default function AuthPage() {
                         name="username"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-sm font-semibold">Username</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="Enter your username" 
-                                {...field} 
-                                data-testid="input-login-username"
-                                className="h-11"
-                              />
-                            </FormControl>
+                            <FormLabel>Username</FormLabel>
+                            <FormControl><Input placeholder="Username" {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -163,34 +153,14 @@ export default function AuthPage() {
                         name="password"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-sm font-semibold">Password</FormLabel>
-                            <FormControl>
-                              <Input 
-                                type="password" 
-                                placeholder="Enter your password" 
-                                {...field}
-                                data-testid="input-login-password"
-                                className="h-11"
-                              />
-                            </FormControl>
+                            <FormLabel>Password</FormLabel>
+                            <FormControl><Input type="password" placeholder="Password" {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
                       />
-                      <Button 
-                        type="submit" 
-                        className="w-full h-11 text-base font-semibold" 
-                        disabled={loginMutation.isPending}
-                        data-testid="button-login-submit"
-                      >
-                        {loginMutation.isPending ? (
-                          <>
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                            Signing in...
-                          </>
-                        ) : (
-                          "Sign In"
-                        )}
+                      <Button type="submit" className="w-full h-11" disabled={loginMutation.isPending}>
+                        {loginMutation.isPending ? <Loader2 className="animate-spin" /> : "Sign In"}
                       </Button>
                     </form>
                   </Form>
@@ -204,15 +174,8 @@ export default function AuthPage() {
                         name="fullName"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-sm font-semibold">Full Name</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="Enter your full name" 
-                                {...field}
-                                data-testid="input-register-fullname"
-                                className="h-11"
-                              />
-                            </FormControl>
+                            <FormLabel>Full Name</FormLabel>
+                            <FormControl><Input placeholder="Full Name" {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -222,16 +185,8 @@ export default function AuthPage() {
                         name="email"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-sm font-semibold">Email</FormLabel>
-                            <FormControl>
-                              <Input 
-                                type="email" 
-                                placeholder="Enter your email" 
-                                {...field}
-                                data-testid="input-register-email"
-                                className="h-11"
-                              />
-                            </FormControl>
+                            <FormLabel>Email</FormLabel>
+                            <FormControl><Input type="email" placeholder="Email" {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -241,15 +196,8 @@ export default function AuthPage() {
                         name="username"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-sm font-semibold">Username</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="Choose a username" 
-                                {...field}
-                                data-testid="input-register-username"
-                                className="h-11"
-                              />
-                            </FormControl>
+                            <FormLabel>Username</FormLabel>
+                            <FormControl><Input placeholder="Username" {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -259,34 +207,14 @@ export default function AuthPage() {
                         name="password"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="text-sm font-semibold">Password</FormLabel>
-                            <FormControl>
-                              <Input 
-                                type="password" 
-                                placeholder="Create a password" 
-                                {...field}
-                                data-testid="input-register-password"
-                                className="h-11"
-                              />
-                            </FormControl>
+                            <FormLabel>Password</FormLabel>
+                            <FormControl><Input type="password" placeholder="Password" {...field} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
                       />
-                      <Button 
-                        type="submit" 
-                        className="w-full h-11 text-base font-semibold" 
-                        disabled={registerMutation.isPending}
-                        data-testid="button-register-submit"
-                      >
-                        {registerMutation.isPending ? (
-                          <>
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                            Creating account...
-                          </>
-                        ) : (
-                          "Create Account"
-                        )}
+                      <Button type="submit" className="w-full h-11" disabled={registerMutation.isPending}>
+                        {registerMutation.isPending ? <Loader2 className="animate-spin" /> : "Create Account"}
                       </Button>
                     </form>
                   </Form>
@@ -296,29 +224,17 @@ export default function AuthPage() {
           </div>
         </div>
 
-        <div 
-          className="hidden lg:flex flex-1 items-center justify-center p-12 relative bg-cover bg-center"
-          style={{
-            backgroundImage: `url(${backgroundImage})`,
-          }}
-        >
-          <div 
-            className="absolute inset-0 bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-slate-900/40"
-            style={{ zIndex: 1 }}
-          />
+        <div className="hidden lg:flex flex-1 items-center justify-center p-12 relative bg-cover bg-center" style={{ backgroundImage: `url(${backgroundImage})` }}>
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-slate-900/40" style={{ zIndex: 1 }} />
           <div className="max-w-xl text-white relative z-10">
             <div className="flex items-center gap-4 mb-10">
               <Shield className="h-14 w-14 text-sky-400" />
               <div>
-                <h1 className="text-4xl font-bold tracking-tight">SafeData Pipeline</h1>
-                <p className="text-sky-100/80 text-lg">Government of India</p>
+                <h1 className="text-4xl font-bold">SafeData Pipeline</h1>
+                <p className="text-sky-100/80">Government of India</p>
               </div>
             </div>
-            
-            <h2 className="text-3xl font-semibold mb-8 leading-tight">
-              Enterprise-Grade Data Privacy & <br />Anonymization Infrastructure
-            </h2>
-            
+            <h2 className="text-3xl font-semibold mb-8 leading-tight">Enterprise-Grade Data Privacy Anonymization Infrastructure</h2>
             <div className="grid grid-cols-1 gap-6">
               {[
                 { icon: Lock, title: "Advanced Anonymization", desc: "K-Anonymity, L-Diversity, T-Closeness, and Differential Privacy" },
@@ -326,31 +242,14 @@ export default function AuthPage() {
                 { icon: FileCheck, title: "Utility Preservation", desc: "Measure and maintain data utility after anonymization" },
                 { icon: BarChart3, title: "Compliance Reporting", desc: "Generate executive, technical, and regulatory compliance reports" }
               ].map((item, idx) => (
-                <div key={idx} className="flex items-start gap-5 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 hover:bg-white/10 transition-colors">
-                  <div className="p-3 bg-sky-500/20 rounded-lg shrink-0">
-                    <item.icon className="h-7 w-7 text-sky-300" />
-                  </div>
+                <div key={idx} className="flex items-start gap-5 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10">
+                  <div className="p-3 bg-sky-500/20 rounded-lg shrink-0"><item.icon className="h-7 w-7 text-sky-300" /></div>
                   <div>
                     <h3 className="font-bold text-lg mb-1">{item.title}</h3>
-                    <p className="text-slate-200/90 leading-relaxed">{item.desc}</p>
+                    <p className="text-slate-200/90">{item.desc}</p>
                   </div>
                 </div>
               ))}
-            </div>
-            
-            <div className="mt-16 pt-8 border-t border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <p className="text-sm font-medium text-slate-300">
-                  Ministry of Electronics and Information Technology
-                </p>
-                <p className="text-xs text-slate-400 mt-1">
-                  Developed by AIRAVATA Technologies
-                </p>
-              </div>
-              <div className="flex gap-4">
-                <div className="h-8 w-px bg-white/10 hidden sm:block" />
-                <img src={airavataLogo} alt="GoI" className="h-10 opacity-70 grayscale invert" />
-              </div>
             </div>
           </div>
         </div>
