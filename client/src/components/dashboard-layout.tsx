@@ -36,34 +36,34 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
       <div className="flex min-h-screen w-full">
         <AppSidebar />
         <SidebarInset className="flex flex-col flex-1">
-          <header className="sticky top-0 z-50 flex h-20 items-center gap-4 border-b bg-background px-6">
-            <div className="flex items-center gap-4 flex-1">
+          <header className="sticky top-0 z-50 flex h-24 items-center gap-4 border-b bg-background px-6">
+            <div className="flex items-center gap-4 flex-1 h-full py-2">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <Separator orientation="vertical" className="h-8" />
+              <Separator orientation="vertical" className="h-10" />
               
-              <div className="flex items-center gap-6 overflow-hidden">
+              <div className="flex items-center gap-8 h-full">
                 {/* Section 1: MoSPI */}
-                <div className="flex items-center gap-3 border-r pr-6 shrink-0">
-                  <img src={mospiLogo} alt="MoSPI Logo" className="h-10 w-auto" />
+                <div className="flex items-center gap-3 border-r pr-8 h-full">
+                  <img src={mospiLogo} alt="MoSPI Logo" className="h-14 w-auto object-contain" />
                   <div className="flex flex-col">
-                    <span className="text-[11px] font-bold leading-tight uppercase text-muted-foreground">Ministry of Statistics and</span>
-                    <span className="text-[11px] font-bold leading-tight uppercase text-muted-foreground">Programme Implementation</span>
+                    <span className="text-[12px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Ministry of Statistics and</span>
+                    <span className="text-[12px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Programme Implementation</span>
                   </div>
                 </div>
 
                 {/* Section 2: MoE & Innovation Cell */}
-                <div className="flex items-center gap-4 border-r pr-6 shrink-0">
+                <div className="flex items-center gap-6 border-r pr-8 h-full">
                   <div className="flex items-center gap-3">
-                    <img src={moeLogo} alt="MoE Logo" className="h-10 w-auto" />
-                    <span className="text-[11px] font-bold leading-tight uppercase text-muted-foreground">Ministry of<br/>Education</span>
+                    <img src={moeLogo} alt="MoE Logo" className="h-14 w-auto object-contain" />
+                    <span className="text-[12px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Ministry of<br/>Education</span>
                   </div>
-                  <div className="h-8 w-px bg-border" />
-                  <img src={innovationCellLogo} alt="Innovation Cell" className="h-10 w-auto" />
+                  <div className="h-10 w-px bg-border" />
+                  <img src={innovationCellLogo} alt="Innovation Cell" className="h-14 w-auto object-contain" />
                 </div>
 
                 {/* Section 3: Statathon */}
-                <div className="flex items-center gap-2 shrink-0">
-                  <img src={statathonLogo} alt="Statathon Logo" className="h-10 w-auto" />
+                <div className="flex items-center gap-2 h-full">
+                  <img src={statathonLogo} alt="Statathon Logo" className="h-14 w-auto object-contain" />
                 </div>
               </div>
             </div>
