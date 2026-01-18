@@ -13,7 +13,6 @@ import { Shield, Lock, Database, FileCheck, BarChart3, Loader2 } from "lucide-re
 import backgroundImage from "@assets/background.jpg";
 
 // Government Logos
-import mospiLogo from "@assets/mospi_logo.svg";
 import moeLogo from "@assets/moe_logo.png";
 import statathonLogo from "@assets/statathon_logo.png";
 import innovationCellLogo from "@assets/innovation_cell_logo.png";
@@ -40,6 +39,8 @@ export default function AuthPage() {
   const [, setLocation] = useLocation();
   const { user, loginMutation, registerMutation } = useAuth();
   const [activeTab, setActiveTab] = useState("login");
+
+  const mospiLogoUrl = "https://www.mospi.gov.in/uploads/primaryLogo/primaryLogo-1dee0dd9-99fd-4b8f-a352-7a53e0655404.svg";
 
   const loginForm = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -78,7 +79,7 @@ export default function AuthPage() {
         <div className="flex items-center justify-between w-full gap-8">
           {/* Section 1: MoSPI */}
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8">
-            <img src={mospiLogo} alt="MoSPI" className="h-16 w-auto object-contain" />
+            <img src={mospiLogoUrl} alt="MoSPI" className="h-16 w-auto object-contain" />
             <div className="flex flex-col">
               <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight font-sans uppercase">GOVERNMENT OF INDIA</span>
               <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Ministry of Statistics and</span>

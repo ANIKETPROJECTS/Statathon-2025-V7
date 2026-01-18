@@ -14,7 +14,6 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-import mospiLogo from "@assets/mospi_logo.svg";
 import moeLogo from "@assets/moe_logo.png";
 import statathonLogo from "@assets/statathon_logo.png";
 import innovationCellLogo from "@assets/innovation_cell_logo.png";
@@ -31,6 +30,8 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
     "--sidebar-width-icon": "3.5rem",
   } as React.CSSProperties;
 
+  const mospiLogoUrl = "https://www.mospi.gov.in/uploads/primaryLogo/primaryLogo-1dee0dd9-99fd-4b8f-a352-7a53e0655404.svg";
+
   return (
     <SidebarProvider style={sidebarStyle}>
       <div className="flex min-h-screen w-full">
@@ -44,7 +45,7 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
               <div className="flex items-center gap-8 h-full">
                 {/* Section 1: MoSPI */}
                 <div className="flex items-center gap-3 border-r border-slate-200 dark:border-slate-800 pr-8 h-full">
-                  <img src={mospiLogo} alt="MoSPI Logo" className="h-14 w-auto object-contain" />
+                  <img src={mospiLogoUrl} alt="MoSPI Logo" className="h-14 w-auto object-contain" />
                   <div className="flex flex-col">
                     <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight uppercase">GOVERNMENT OF INDIA</span>
                     <span className="text-[13px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Ministry of Statistics and</span>
