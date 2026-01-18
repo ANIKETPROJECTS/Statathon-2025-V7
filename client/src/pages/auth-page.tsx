@@ -17,6 +17,8 @@ import moeLogo from "@assets/moe_logo.png";
 import statathonLogo from "@assets/statathon_logo.png";
 import innovationCellLogo from "@assets/innovation_cell_logo.png";
 import airavataLogo from "@assets/airavata_logo.png";
+import goiLogo from "@assets/Government_of_India_logo.svg";
+import moeIndiaLogo from "@assets/Ministry_of_Education_India.svg";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -75,11 +77,11 @@ export default function AuthPage() {
       <header className="relative z-50 w-full bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 py-4 px-8">
         <div className="flex items-center justify-between w-full gap-8 overflow-visible">
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <img src="/attached_assets/Government_of_India_logo.svg" alt="Government of India" className="h-20 w-auto object-contain" />
+            <img src={goiLogo} alt="Government of India" className="h-20 w-auto object-contain" />
           </div>
 
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <img src="/attached_assets/Ministry_of_Education_India.svg" alt="Ministry of Education" className="h-20 w-auto object-contain" />
+            <img src={moeIndiaLogo} alt="Ministry of Education" className="h-20 w-auto object-contain" />
           </div>
 
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
