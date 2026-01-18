@@ -42,19 +42,12 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
               
               <div className="flex items-center gap-8 h-full overflow-visible">
                 <div className="flex items-center gap-3 border-r border-slate-200 dark:border-slate-800 pr-8 h-full overflow-visible">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight uppercase">GOVERNMENT OF INDIA</span>
-                    <span className="text-[13px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Ministry of Statistics and</span>
-                    <span className="text-[13px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Programme Implementation</span>
-                  </div>
+                  <img src="/attached_assets/Government_of_India_logo.svg" alt="Government of India" className="h-14 w-auto object-contain" />
                 </div>
 
                 <div className="flex items-center gap-6 border-r border-slate-200 dark:border-slate-800 pr-8 h-full overflow-visible">
                   <div className="flex items-center gap-3">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight uppercase">GOVERNMENT OF INDIA</span>
-                      <span className="text-[13px] font-bold leading-tight uppercase text-slate-900 dark:text-white">Ministry of Education</span>
-                    </div>
+                    <img src="/attached_assets/Ministry_of_Education_India.svg" alt="Ministry of Education" className="h-14 w-auto object-contain" />
                   </div>
                   <div className="h-10 w-px bg-slate-200 dark:bg-slate-800" />
                   <img src={innovationCellLogo} alt="Innovation Cell" className="h-14 w-auto object-contain min-w-[100px]" />

@@ -75,18 +75,11 @@ export default function AuthPage() {
       <header className="relative z-50 w-full bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 py-4 px-8">
         <div className="flex items-center justify-between w-full gap-8 overflow-visible">
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight font-sans uppercase">GOVERNMENT OF INDIA</span>
-              <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Ministry of Statistics and</span>
-              <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Programme Implementation</span>
-            </div>
+            <img src="/attached_assets/Government_of_India_logo.svg" alt="Government of India" className="h-20 w-auto object-contain" />
           </div>
 
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight font-sans uppercase">GOVERNMENT OF INDIA</span>
-              <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Ministry of Education</span>
-            </div>
+            <img src="/attached_assets/Ministry_of_Education_India.svg" alt="Ministry of Education" className="h-20 w-auto object-contain" />
           </div>
 
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
