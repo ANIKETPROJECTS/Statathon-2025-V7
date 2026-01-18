@@ -99,7 +99,16 @@ export default function AuthPage() {
           </div>
 
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <img src="https://www.education.gov.in/sites/all/themes/moe/images/logo.png" alt="MoE" className="h-20 w-auto object-contain min-w-[80px]" />
+            <img 
+              src="https://www.education.gov.in/sites/all/themes/moe/images/logo.png" 
+              alt="MoE Logo" 
+              className="h-20 w-auto object-contain min-w-[80px]"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.onerror = null;
+                target.src = "https://www.education.gov.in/sites/default/files/logo_0.png";
+              }}
+            />
             <div className="flex flex-col">
               <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 leading-tight font-sans uppercase">GOVERNMENT OF INDIA</span>
               <span className="text-[14px] font-bold text-slate-900 dark:text-white leading-tight font-sans">Ministry of Education</span>
