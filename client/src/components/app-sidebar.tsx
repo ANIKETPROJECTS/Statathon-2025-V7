@@ -71,7 +71,7 @@ export function AppSidebar() {
           <img 
             src="/airavata-icon.png" 
             alt="AIRAVATA" 
-            className="h-12 w-auto object-contain"
+            className="h-16 w-auto object-contain"
           />
         </div>
       </SidebarHeader>
@@ -128,7 +128,7 @@ export function AppSidebar() {
             <img 
               src="/mospi-footer-logo.png" 
               alt="Ministry of Statistics" 
-              className="h-10 w-auto object-contain brightness-0 dark:brightness-100 invert-0 dark:invert"
+              className="h-12 w-auto object-contain"
             />
           </div>
           <div className="flex items-center gap-3">
