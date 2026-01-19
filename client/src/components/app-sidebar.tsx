@@ -66,7 +66,7 @@ export function AppSidebar() {
           <img 
             src="/airavata-icon.png" 
             alt="AIRAVATA" 
-            className="h-16 w-auto object-contain"
+            className="h-20 w-auto object-contain"
           />
         </div>
       </SidebarHeader>
@@ -118,12 +118,12 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
-        <div className="flex flex-col gap-4">
-          <div className="flex justify-center">
+        <div className="flex flex-col gap-6">
+          <div className="flex justify-center -mx-2">
             <img 
               src="/mospi-footer-logo.png" 
               alt="Ministry of Statistics" 
-              className="w-full h-auto object-contain"
+              className="w-full h-auto scale-110 object-contain"
             />
           </div>
           <div className="flex items-center gap-3">
