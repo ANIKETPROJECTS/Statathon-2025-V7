@@ -89,7 +89,7 @@ export default function AuthPage() {
         <div className="flex-1 flex flex-col items-center justify-start pt-8 p-8 bg-white dark:bg-slate-900 overflow-visible lg:border-l lg:border-slate-200 lg:dark:border-slate-800 relative">
           <div className="absolute top-4 right-4 flex flex-col items-end text-right">
             <img 
-              src="/attached_assets/Screenshot_2026-01-19_at_10.50.04_AM_1768800007297.png" 
+              src="/attached_assets/Screenshot_2026-01-19_at_10.53.11_AM_1768800194372.png" 
               alt="SIH 2024" 
               className="h-12 w-auto object-contain mb-1"
             />
