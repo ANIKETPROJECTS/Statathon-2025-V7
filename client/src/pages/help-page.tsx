@@ -242,7 +242,7 @@ export default function HelpPage() {
                 </div>
                 <div>
                   <p className="text-sm font-medium">Email Support</p>
-                  <p className="text-sm text-muted-foreground">support@safedata.gov.in</p>
+                  <p className="text-sm text-muted-foreground">info@airavatatechnologies.com</p>
                 </div>
               </div>
 
@@ -252,7 +252,7 @@ export default function HelpPage() {
                 </div>
                 <div>
                   <p className="text-sm font-medium">Phone Support</p>
-                  <p className="text-sm text-muted-foreground">+91 11 2436 2121</p>
+                  <p className="text-sm text-muted-foreground">+91 9619523254</p>
                 </div>
               </div>
 
@@ -261,8 +261,8 @@ export default function HelpPage() {
                   <Globe className="h-5 w-5 text-chart-4" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">Knowledge Base</p>
-                  <p className="text-sm text-muted-foreground">docs.safedata.gov.in</p>
+                  <p className="text-sm font-medium">Website</p>
+                  <p className="text-sm text-muted-foreground">www.airavatatechnologies.com</p>
                 </div>
               </div>
             </div>
@@ -270,10 +270,6 @@ export default function HelpPage() {
             <div className="mt-6 p-4 rounded-lg bg-muted/30">
               <p className="text-sm text-muted-foreground">
                 <strong>Office Hours:</strong> Monday to Friday, 9:00 AM - 6:00 PM IST
-              </p>
-              <p className="text-sm text-muted-foreground mt-1">
-                <strong>Address:</strong> Ministry of Electronics and Information Technology,
-                Electronics Niketan, CGO Complex, New Delhi - 110003
               </p>
             </div>
           </CardContent>
