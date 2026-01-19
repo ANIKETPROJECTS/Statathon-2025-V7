@@ -88,6 +88,11 @@ export default function AuthPage() {
       <div className="flex-1 flex flex-col lg:flex-row-reverse h-full overflow-y-auto">
         <div className="flex-1 flex flex-col items-center justify-start pt-8 p-8 bg-white dark:bg-slate-900 overflow-visible lg:border-l lg:border-slate-200 lg:dark:border-slate-800 relative">
           <div className="absolute top-4 right-4 flex flex-col items-end text-right">
+            <img 
+              src="/attached_assets/Screenshot_2026-01-19_at_10.50.04_AM_1768800007297.png" 
+              alt="SIH 2024" 
+              className="h-12 w-auto object-contain mb-1"
+            />
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400">SIH1693</span>
             <span className="text-[10px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-tighter">SIH 2024 WINNER</span>
           </div>
