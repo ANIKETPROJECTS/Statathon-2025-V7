@@ -15,10 +15,8 @@ import {
 } from "@/components/ui/breadcrumb";
 
 import moeLogo from "@assets/moe_logo.png";
-import statathonLogo from "@assets/statathon_logo.png";
+import statathonLogo from "@assets/Screenshot_2026-01-19_at_9.37.15_AM_1768795639830.png";
 import innovationCellLogo from "@assets/innovation_cell_logo.png";
-import goiLogo from "@assets/Government_of_India_logo.svg";
-import moeIndiaLogo from "@assets/Ministry_of_Education_India.svg";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -56,7 +54,7 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
                 </div>
 
                 <div className="flex items-center gap-2 h-full overflow-visible">
-                  <img src={statathonLogo} alt="Statathon Logo" className="h-14 w-auto object-contain min-w-[56px]" />
+                  <img src={statathonLogo} alt="Statathon Logo" className="h-14 w-auto object-contain min-w-[120px]" />
                 </div>
               </div>
             </div>

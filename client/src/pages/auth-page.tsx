@@ -12,11 +12,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Shield, Lock, Database, FileCheck, BarChart3, Loader2 } from "lucide-react";
 import backgroundImage from "@assets/background.jpg";
 import moeLogo from "@assets/moe_logo.png";
-import statathonLogo from "@assets/statathon_logo.png";
+import statathonLogo from "@assets/Screenshot_2026-01-19_at_9.37.15_AM_1768795639830.png";
 import innovationCellLogo from "@assets/innovation_cell_logo.png";
 import airavataLogo from "@assets/airavata_logo.png";
-import goiLogo from "@assets/Government_of_India_logo.svg";
-import moeIndiaLogo from "@assets/Ministry_of_Education_India.svg";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -87,7 +85,7 @@ export default function AuthPage() {
           </div>
 
           <div className="flex-1 flex items-center justify-center overflow-visible">
-            <img src={statathonLogo} alt="Statathon 2025" className="h-20 w-auto object-contain min-w-[80px]" />
+            <img src={statathonLogo} alt="Statathon 2025" className="h-20 w-auto object-contain min-w-[180px]" />
           </div>
         </div>
       </header>
