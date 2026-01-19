@@ -119,11 +119,11 @@ export function AppSidebar() {
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex flex-col gap-6">
-          <div className="flex justify-center -mx-2">
+          <div className="flex justify-center">
             <img 
               src="/mospi-footer-logo.png" 
               alt="Ministry of Statistics" 
-              className="w-full h-auto scale-110 object-contain"
+              className="w-full h-auto object-contain"
             />
           </div>
           <div className="flex items-center gap-3">
