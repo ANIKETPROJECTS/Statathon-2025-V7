@@ -52,7 +52,7 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
                 </div>
 
                 <div className="flex items-center gap-2 h-full overflow-visible">
-                  <img src="/attached_assets/Screenshot_2026-01-19_at_9.37.15_AM_1768795639830.png" alt="Statathon Logo" className="h-14 w-auto object-contain min-w-[120px]" />
+                  <img src="/attached_assets/statathon_logo.png" alt="Statathon Logo" className="h-14 w-auto object-contain min-w-[120px]" />
                 </div>
               </div>
             </div>

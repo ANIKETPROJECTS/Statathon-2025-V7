@@ -80,7 +80,7 @@ export default function AuthPage() {
           </div>
 
           <div className="flex-1 flex items-center justify-center overflow-visible">
-            <img src="/attached_assets/Screenshot_2026-01-19_at_9.37.15_AM_1768795639830.png" alt="Statathon 2025" className="h-20 w-auto object-contain min-w-[180px]" />
+            <img src="/attached_assets/statathon_logo.png" alt="Statathon 2025" className="h-20 w-auto object-contain min-w-[180px]" />
           </div>
         </div>
       </header>
