@@ -85,7 +85,7 @@ export default function AuthPage() {
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col lg:flex-row-reverse h-full">
+      <div className="flex-1 flex flex-col lg:flex-row-reverse h-full overflow-y-auto">
         <div className="flex-1 flex flex-col items-center justify-start pt-8 p-8 bg-white dark:bg-slate-900 overflow-visible lg:border-l lg:border-slate-200 lg:dark:border-slate-800">
           <div className="w-full max-w-md space-y-0">
             <div className="text-center space-y-0">
@@ -93,13 +93,13 @@ export default function AuthPage() {
                 <img 
                   src="/attached_assets/airavata_logo_large.png" 
                   alt="AIRAVATA" 
-                  className="h-[240px] w-auto object-contain" 
+                  className="h-[200px] w-auto object-contain" 
                   data-testid="img-airavata-logo"
                 />
               </div>
             </div>
             
-            <div className="bg-white dark:bg-slate-900 p-2 min-h-[400px]">
+            <div className="bg-white dark:bg-slate-900 p-2 min-h-[380px]">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
                 <TabsList className="grid w-full grid-cols-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg shrink-0">
                   <TabsTrigger value="login" className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700">Login</TabsTrigger>
@@ -235,28 +235,27 @@ export default function AuthPage() {
         </div>
       </div>
 
-      <footer className="w-full py-3 text-center border-t border-slate-100 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm shrink-0">
-        <div className="flex flex-col items-center justify-center space-y-1 text-xs text-slate-500 dark:text-slate-400">
-          <p className="font-medium">
+      <footer className="w-full py-2 text-center border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 z-50">
+        <div className="flex items-center justify-center space-x-2 text-[10px] md:text-xs text-slate-500 dark:text-slate-400 px-4">
+          <span className="font-medium whitespace-nowrap">
             Developed by <span className="text-slate-900 dark:text-white font-bold">AIRAVATA TECHNOLOGIES</span>
-          </p>
-          <div className="flex items-center space-x-4">
-            <a 
-              href="https://www.airavatatechnologies.com/" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="hover:text-primary transition-colors underline underline-offset-4"
-            >
-              www.airavatatechnologies.com
-            </a>
-            <span className="text-slate-300 dark:text-slate-700">|</span>
-            <a 
-              href="mailto:info@airavatatechnologies.com" 
-              className="hover:text-primary transition-colors underline underline-offset-4"
-            >
-              info@airavatatechnologies.com
-            </a>
-          </div>
+          </span>
+          <span className="text-slate-300 dark:text-slate-700">|</span>
+          <a 
+            href="https://www.airavatatechnologies.com/" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="hover:text-primary transition-colors underline underline-offset-4 whitespace-nowrap"
+          >
+            www.airavatatechnologies.com
+          </a>
+          <span className="text-slate-300 dark:text-slate-700">|</span>
+          <a 
+            href="mailto:info@airavatatechnologies.com" 
+            className="hover:text-primary transition-colors underline underline-offset-4 whitespace-nowrap"
+          >
+            info@airavatatechnologies.com
+          </a>
         </div>
       </footer>
     </div>
