@@ -266,12 +266,6 @@ export default function HelpPage() {
                 </div>
               </div>
             </div>
-
-            <div className="mt-6 p-4 rounded-lg bg-muted/30">
-              <p className="text-sm text-muted-foreground">
-                <strong>Office Hours:</strong> Monday to Friday, 9:00 AM - 6:00 PM IST
-              </p>
-            </div>
           </CardContent>
         </Card>
 
