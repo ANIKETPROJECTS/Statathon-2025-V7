@@ -1036,56 +1036,154 @@ export async function registerRoutes(
           <head>
             <title>${report.title}</title>
             <style>
-              body { font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
-              h1 { color: #2563EB; }
-              .section { margin: 20px 0; padding: 20px; background: #f8fafc; border-radius: 8px; }
-              .metric { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
+              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; max-width: 900px; margin: 0 auto; color: #1e293b; line-height: 1.6; }
+              header { border-bottom: 2px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
+              .logo-box { background: #2563eb; color: white; padding: 10px 20px; border-radius: 4px; font-weight: bold; }
+              h1 { color: #2563eb; margin: 0; }
+              h2 { color: #334155; border-left: 4px solid #2563eb; padding-left: 10px; margin-top: 30px; }
+              .section { margin: 20px 0; padding: 25px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+              .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 15px; }
+              .metric-card { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #f1f5f9; }
+              .metric-label { display: block; font-size: 0.875rem; color: #64748b; font-weight: 500; }
+              .metric-value { display: block; font-size: 1.25rem; color: #0f172a; font-weight: 700; margin-top: 5px; }
+              .badge { display: inline-block; padding: 4px 12px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+              .badge-high { background: #fee2e2; color: #991b1b; }
+              .badge-medium { background: #fef3c7; color: #92400e; }
+              .badge-low { background: #dcfce7; color: #166534; }
+              .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 0.875rem; }
+              .report-type { font-weight: 600; color: #2563eb; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.875rem; }
             </style>
           </head>
           <body>
-            <h1>${report.title}</h1>
-            <p>Generated: ${content.generatedAt}</p>
-            <p>Organization: ${content.organization}</p>
-            <p>Department: ${content.department}</p>
+            <header>
+              <div>
+                <div class="report-type">${report.type} Report</div>
+                <h1>${report.title}</h1>
+              </div>
+              <div class="logo-box">SafeData Pipeline</div>
+            </header>
+
+            <div class="section">
+              <h2>Executive Summary</h2>
+              <p>This report provides a detailed analysis of data privacy risks and utility preservation for the analyzed dataset. 
+              The assessment follows NISTIR 8053 methodology to ensure academic and regulatory compliance.</p>
+              <div class="metric-grid">
+                <div class="metric-card">
+                  <span class="metric-label">Generated On</span>
+                  <span class="metric-value">${new Date(content.generatedAt).toLocaleDateString()}</span>
+                </div>
+                <div class="metric-card">
+                  <span class="metric-label">Risk Level</span>
+                  <span class="metric-value">
+                    <span class="badge ${content.riskAssessment?.riskLevel === 'High' ? 'badge-high' : content.riskAssessment?.riskLevel === 'Medium' ? 'badge-medium' : 'badge-low'}">
+                      ${content.riskAssessment?.riskLevel || 'N/A'}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
             ${content.dataset ? `
               <div class="section">
-                <h2>Dataset Information</h2>
-                <div class="metric"><span>Name:</span><span>${content.dataset.name}</span></div>
-                <div class="metric"><span>Rows:</span><span>${content.dataset.rows}</span></div>
-                <div class="metric"><span>Columns:</span><span>${content.dataset.columns}</span></div>
-                <div class="metric"><span>Quality Score:</span><span>${(content.dataset.qualityScore * 100).toFixed(1)}%</span></div>
+                <h2>Dataset Profile</h2>
+                <div class="metric-grid">
+                  <div class="metric-card"><span class="metric-label">Filename</span><span class="metric-value">${content.dataset.name}</span></div>
+                  <div class="metric-card"><span class="metric-label">Record Count</span><span class="metric-value">${content.dataset.rows.toLocaleString()}</span></div>
+                  <div class="metric-card"><span class="metric-label">Quality Score</span><span class="metric-value">${(content.dataset.qualityScore * 100).toFixed(1)}%</span></div>
+                </div>
               </div>
             ` : ""}
-            ${content.riskAssessment ? `
+
+            ${report.type !== 'executive' && content.riskAssessment ? `
               <div class="section">
-                <h2>Risk Assessment</h2>
-                <div class="metric"><span>Risk Level:</span><span>${content.riskAssessment.riskLevel}</span></div>
-                <div class="metric"><span>Overall Risk:</span><span>${(content.riskAssessment.overallRisk * 100).toFixed(1)}%</span></div>
-                <div class="metric"><span>Violations:</span><span>${content.riskAssessment.violations}</span></div>
-                <div class="metric"><span>Unique Records:</span><span>${content.riskAssessment.uniqueRecords}</span></div>
+                <h2>Privacy Risk Metrics</h2>
+                <div class="metric-grid">
+                  <div class="metric-card"><span class="metric-label">Overall Risk Probability</span><span class="metric-value">${(content.riskAssessment.overallRisk * 100).toFixed(2)}%</span></div>
+                  <div class="metric-card"><span class="metric-label">K-Anonymity Violations</span><span class="metric-value">${content.riskAssessment.violations}</span></div>
+                  <div class="metric-card"><span class="metric-label">Unique Records (Identifiable)</span><span class="metric-value">${content.riskAssessment.uniqueRecords}</span></div>
+                </div>
               </div>
             ` : ""}
-            ${content.utilityMeasurement ? `
+
+            ${report.type === 'comprehensive' && content.utilityMeasurement ? `
               <div class="section">
-                <h2>Utility Measurement</h2>
-                <div class="metric"><span>Utility Level:</span><span>${content.utilityMeasurement.utilityLevel}</span></div>
-                <div class="metric"><span>Overall Utility:</span><span>${(content.utilityMeasurement.overallUtility * 100).toFixed(1)}%</span></div>
-                <div class="metric"><span>Information Loss:</span><span>${(content.utilityMeasurement.informationLoss * 100).toFixed(1)}%</span></div>
+                <h2>Utility & Information Loss</h2>
+                <div class="metric-grid">
+                  <div class="metric-card"><span class="metric-label">Data Utility Level</span><span class="metric-value">${content.utilityMeasurement.utilityLevel}</span></div>
+                  <div class="metric-card"><span class="metric-label">Utility Score</span><span class="metric-value">${(content.utilityMeasurement.overallUtility * 100).toFixed(1)}%</span></div>
+                  <div class="metric-card"><span class="metric-label">Information Loss</span><span class="metric-value">${(content.utilityMeasurement.informationLoss * 100).toFixed(1)}%</span></div>
+                </div>
               </div>
             ` : ""}
-            <footer style="margin-top: 40px; text-align: center; color: #64748b;">
-              <p>SafeData Pipeline - Data Privacy Protection & Anonymization System</p>
-              <p>Developed by AIRAVATA Technologies</p>
-            </footer>
+
+            <div class="footer">
+              <p>SafeData Pipeline - Enterprise Data Privacy Protection System</p>
+              <p>Government of India - Ministry of Statistics and Programme Implementation</p>
+              <p>Developed by AIRAVATA Technologies | www.airavatatechnologies.com</p>
+            </div>
           </body>
           </html>
         `;
         res.setHeader("Content-Type", "text/html");
+        res.setHeader("Content-Disposition", `attachment; filename="${report.title.replace(/\s+/g, "_")}.html"`);
         res.send(html);
       } else {
-        // For PDF, return a simple text version for now
-        res.setHeader("Content-Type", "application/json");
-        res.json(content);
+        // PDF generation using jspdf on the server
+        const { jsPDF } = await import("jspdf");
+        const doc = new jsPDF();
+        
+        doc.setFontSize(22);
+        doc.setTextColor(37, 99, 235);
+        doc.text(report.title, 20, 20);
+        
+        doc.setFontSize(12);
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Report Type: ${report.type.toUpperCase()}`, 20, 30);
+        doc.text(`Generated: ${new Date(content.generatedAt).toLocaleString()}`, 20, 37);
+        
+        let y = 50;
+        
+        if (content.dataset) {
+          doc.setFontSize(16);
+          doc.setTextColor(30, 41, 59);
+          doc.text("Dataset Information", 20, y);
+          y += 10;
+          doc.setFontSize(12);
+          doc.text(`Name: ${content.dataset.name}`, 25, y); y += 7;
+          doc.text(`Rows: ${content.dataset.rows}`, 25, y); y += 7;
+          doc.text(`Quality Score: ${(content.dataset.qualityScore * 100).toFixed(1)}%`, 25, y);
+          y += 15;
+        }
+
+        if (content.riskAssessment) {
+          doc.setFontSize(16);
+          doc.text("Risk Assessment", 20, y);
+          y += 10;
+          doc.setFontSize(12);
+          doc.text(`Risk Level: ${content.riskAssessment.riskLevel}`, 25, y); y += 7;
+          doc.text(`Overall Risk: ${(content.riskAssessment.overallRisk * 100).toFixed(2)}%`, 25, y); y += 7;
+          doc.text(`Violations: ${content.riskAssessment.violations}`, 25, y);
+          y += 15;
+        }
+
+        if (report.type === 'comprehensive' && content.utilityMeasurement) {
+          doc.setFontSize(16);
+          doc.text("Utility Measurement", 20, y);
+          y += 10;
+          doc.setFontSize(12);
+          doc.text(`Utility Level: ${content.utilityMeasurement.utilityLevel}`, 25, y); y += 7;
+          doc.text(`Overall Utility: ${(content.utilityMeasurement.overallUtility * 100).toFixed(1)}%`, 25, y);
+          y += 15;
+        }
+
+        doc.setFontSize(10);
+        doc.setTextColor(148, 163, 184);
+        doc.text("Generated by SafeData Pipeline - AIRAVATA Technologies", 105, 285, { align: "center" });
+
+        const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${report.title.replace(/\s+/g, "_")}.pdf"`);
+        res.send(pdfBuffer);
       }
     } catch (error) {
       res.status(500).send("Failed to download report");
