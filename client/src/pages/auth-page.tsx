@@ -197,31 +197,38 @@ export default function AuthPage() {
         </div>
 
         <div className="hidden lg:flex flex-1 items-center justify-center p-12 relative bg-cover bg-center" style={{ backgroundImage: `url(${backgroundImage})` }}>
-          <div className="absolute inset-0 bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-slate-900/40" style={{ zIndex: 1 }} />
-          <div className="max-w-xl text-white relative z-10">
-            <div className="flex items-center gap-4 mb-10">
-              <Shield className="h-14 w-14 text-sky-400" />
-              <div>
-                <h1 className="text-4xl font-bold">SafeData Pipeline</h1>
-                <p className="text-sky-100/80">Government of India</p>
-              </div>
-            </div>
-            <h2 className="text-3xl font-semibold mb-8 leading-tight">Enterprise-Grade Data Privacy Anonymization Infrastructure</h2>
-            <div className="grid grid-cols-1 gap-6">
-              {[
-                { icon: Lock, title: "Advanced Anonymization", desc: "K-Anonymity, L-Diversity, T-Closeness, and Differential Privacy" },
-                { icon: Database, title: "Risk Assessment", desc: "Comprehensive re-identification risk analysis and mitigation" },
-                { icon: FileCheck, title: "Utility Preservation", desc: "Measure and maintain data utility after anonymization" },
-                { icon: BarChart3, title: "Compliance Reporting", desc: "Generate executive, technical, and regulatory compliance reports" }
-              ].map((item, idx) => (
-                <div key={idx} className="flex items-start gap-5 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10">
-                  <div className="p-3 bg-sky-500/20 rounded-lg shrink-0"><item.icon className="h-7 w-7 text-sky-300" /></div>
-                  <div>
-                    <h3 className="font-bold text-lg mb-1">{item.title}</h3>
-                    <p className="text-slate-200/90">{item.desc}</p>
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900/95 via-slate-900/85 to-slate-900/60" style={{ zIndex: 1 }} />
+          <div className="max-w-2xl text-white relative z-10 w-full">
+            <div className="flex flex-col items-center text-center mb-12">
+              <img 
+                src="/attached_assets/mospi_logo_large.png" 
+                alt="MoSPI Government of India" 
+                className="h-32 w-auto object-contain mb-8 bg-white/10 p-4 rounded-xl backdrop-blur-sm border border-white/20" 
+              />
+              <div className="space-y-6 w-full">
+                <div className="p-6 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 shadow-2xl">
+                  <div className="grid grid-cols-1 gap-4 text-left">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <span className="text-sky-300 font-medium uppercase tracking-wider text-sm">Team Name</span>
+                      <span className="text-2xl font-bold">AIRAVATA</span>
+                    </div>
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <span className="text-sky-300 font-medium uppercase tracking-wider text-sm">Team ID</span>
+                      <span className="text-2xl font-bold">4208</span>
+                    </div>
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <span className="text-sky-300 font-medium uppercase tracking-wider text-sm">Problem Statement ID</span>
+                      <span className="text-2xl font-bold">1</span>
+                    </div>
+                    <div className="pt-2">
+                      <span className="text-sky-300 font-medium uppercase tracking-wider text-sm block mb-2">Problem Statement Title</span>
+                      <p className="text-xl font-semibold leading-relaxed text-white">
+                        Evaluation of Effectiveness of Data Encryption and Anonymisation Adopted for Unit-level Data of NSS and Creation of an improved Safe Data Tool
+                      </p>
+                    </div>
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
           </div>
         </div>
