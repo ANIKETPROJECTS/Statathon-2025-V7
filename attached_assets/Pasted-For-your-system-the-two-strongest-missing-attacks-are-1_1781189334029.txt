@@ -1,0 +1,285 @@
+For your system, the two strongest missing attacks are:
+
+# 1️⃣ Record Linkage Attack
+
+### Objective
+
+Determine whether records in an anonymized dataset can be linked to records in an external dataset.
+
+---
+
+## Mathematical Model
+
+Let:
+
+```text
+D = Anonymized Dataset
+E = External Dataset
+
+QI = {Age, Gender, City}
+```
+
+For every record:
+
+```text
+r ∈ D
+```
+
+Find matches in:
+
+```text
+M(r) = { e ∈ E | e.QI = r.QI }
+```
+
+---
+
+### Re-identification Probability
+
+If:
+
+```text
+|M(r)| = 1
+```
+
+then
+
+```text
+P(re-identification) = 1
+```
+
+If:
+
+```text
+|M(r)| = k
+```
+
+then
+
+```text
+P(re-identification) = 1/k
+```
+
+---
+
+### Dataset Risk
+
+For N records:
+
+```text
+Risk = ( Σ (1 / |M(r)|) ) / N
+```
+
+---
+
+### Example
+
+| Age | Gender | City   |
+| --- | ------ | ------ |
+| 28  | M      | Mumbai |
+
+External Data:
+
+| Age | Gender | City   |
+| --- | ------ | ------ |
+| 28  | M      | Mumbai |
+
+Only 1 match:
+
+```text
+Risk = 1
+```
+
+100% re-identifiable.
+
+---
+
+## Algorithm
+
+```python
+total_risk = 0
+
+for record in anonymized_dataset:
+
+    matches = find_matches(
+        external_dataset,
+        quasi_identifiers
+    )
+
+    if len(matches) > 0:
+        total_risk += 1 / len(matches)
+
+record_linkage_risk = total_risk / total_records
+```
+
+---
+
+## Risk Levels
+
+```text
+0 - 20%     LOW
+20 - 50%    MEDIUM
+50 - 75%    HIGH
+75 -100%    CRITICAL
+```
+
+---
+
+# 2️⃣ Attribute Disclosure Attack
+
+### Objective
+
+Even if identity is hidden:
+
+```text
+Can attacker infer sensitive information?
+```
+
+Example:
+
+```text
+QI:
+Age=35
+Gender=M
+City=Mumbai
+
+Sensitive:
+Disease
+```
+
+---
+
+## Mathematical Model
+
+Create equivalence classes:
+
+```text
+EC(QI)
+```
+
+Example:
+
+| Age | Gender | City   |
+| --- | ------ | ------ |
+| 35  | M      | Mumbai |
+| 35  | M      | Mumbai |
+| 35  | M      | Mumbai |
+| 35  | M      | Mumbai |
+| 35  | M      | Mumbai |
+
+Sensitive values:
+
+```text
+Cancer
+Cancer
+Cancer
+Cancer
+Flu
+```
+
+---
+
+### Dominant Sensitive Value
+
+```text
+Pmax =
+max(freq(value)) / class_size
+```
+
+For above:
+
+```text
+Pmax = 4 / 5
+     = 0.8
+```
+
+---
+
+### Attribute Disclosure Risk
+
+```text
+ADR = Pmax × 100
+```
+
+Result:
+
+```text
+ADR = 80%
+```
+
+Meaning:
+
+An attacker can guess the disease correctly with 80% confidence.
+
+---
+
+### Entropy-Based Version (Better)
+
+Entropy:
+
+H(S)=-\sum_{i=1}^{n} p_i \log_2(p_i)
+
+Where:
+
+```text
+p_i = probability of sensitive value i
+```
+
+Risk:
+
+```text
+Risk = 1 - (Observed Entropy / Maximum Entropy)
+```
+
+---
+
+### Algorithm
+
+```python
+groups = df.groupby(quasi_identifiers)
+
+for group in groups:
+
+    counts = sensitive_values.value_counts()
+
+    dominant = max(counts)
+
+    risk = dominant / len(group)
+
+    store(risk)
+```
+
+---
+
+## Risk Levels
+
+```text
+ADR < 30%      LOW
+30-60%         MEDIUM
+60-80%         HIGH
+>80%           CRITICAL
+```
+
+---
+
+# For Statathon
+
+### Existing Attacks
+
+1. Prosecutor
+2. Journalist
+3. Marketer
+4. Singling Out
+5. Inference
+6. Membership
+
+### Add
+
+7. Record Linkage Attack ⭐
+8. Attribute Disclosure Attack ⭐
+
+These two are the most valuable additions because:
+
+* Record Linkage measures **identity disclosure**
+* Attribute Disclosure measures **sensitive information disclosure**
+
+Together they cover the two biggest privacy threats judges typically look for.

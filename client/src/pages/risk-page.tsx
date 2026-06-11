@@ -29,6 +29,8 @@ import { runMarketerAttack, type MarketerResult } from "@/lib/attacks/marketerAt
 import { runSingleOutAttack, type SingleOutResult } from "@/lib/attacks/singleOutAttack";
 import { runInferenceAttack, type InferenceResult } from "@/lib/attacks/inferenceAttack";
 import { runMembershipAttack, type MembershipResult } from "@/lib/attacks/membershipAttack";
+import { runRecordLinkageAttack, type RecordLinkageResult } from "@/lib/attacks/recordLinkageAttack";
+import { runAttributeDisclosureAttack, type AttributeDisclosureResult } from "@/lib/attacks/attributeDisclosureAttack";
 import { computeCompositeScore, type CompositeResult } from "@/lib/attacks/compositeScore";
 import { sampleData, type DataRow, RISK_COLORS, type RiskLevel } from "@/lib/attacks/utils";
 
@@ -41,18 +43,22 @@ interface AllResults {
   singlingOut?: SingleOutResult;
   inference?: InferenceResult;
   membership?: MembershipResult;
+  recordLinkage?: RecordLinkageResult;
+  attributeDisclosure?: AttributeDisclosureResult;
   composite?: CompositeResult;
 }
 
-type AttackId = "prosecutor" | "journalist" | "marketer" | "singlingOut" | "inference" | "membership";
+type AttackId = "prosecutor" | "journalist" | "marketer" | "singlingOut" | "inference" | "membership" | "recordLinkage" | "attributeDisclosure";
 
 const ATTACKS: { id: AttackId; label: string; short: string; icon: React.ReactNode; description: string }[] = [
-  { id: "prosecutor", label: "Prosecutor Attack", short: "Prosecutor", icon: <Target className="h-4 w-4" />, description: "Record Linkage Simulation — Attacker knows target is in dataset" },
-  { id: "journalist", label: "Journalist Attack", short: "Journalist", icon: <Eye className="h-4 w-4" />, description: "Probabilistic Re-ID — Information-theoretic risk via equivalence classes" },
-  { id: "marketer", label: "Marketer Attack", short: "Marketer", icon: <Users className="h-4 w-4" />, description: "Attribute Disclosure — L-Diversity & T-Closeness group analysis" },
-  { id: "singlingOut", label: "Singling Out", short: "Singling Out", icon: <Fingerprint className="h-4 w-4" />, description: "GDPR Article 4(1) — Minimal attribute combination to isolate a record" },
-  { id: "inference", label: "Inference Attack", short: "Inference", icon: <Brain className="h-4 w-4" />, description: "ML-Based Prediction — Decision tree predicts sensitive attrs from QIs" },
-  { id: "membership", label: "Membership Attack", short: "Membership", icon: <UserCheck className="h-4 w-4" />, description: "Presence Detection — Can attacker tell if a record is in the dataset?" },
+  { id: "prosecutor",           label: "Prosecutor Attack",          short: "Prosecutor",    icon: <Target className="h-4 w-4" />,      description: "Within-Dataset Re-ID — Attacker knows target is in dataset, uses QIs to isolate" },
+  { id: "journalist",           label: "Journalist Attack",          short: "Journalist",    icon: <Eye className="h-4 w-4" />,         description: "Probabilistic Re-ID — Information-theoretic risk via Shannon entropy and EC analysis" },
+  { id: "marketer",             label: "Marketer Attack",            short: "Marketer",      icon: <Users className="h-4 w-4" />,       description: "Group Targeting — L-Diversity & T-Closeness: attacker targets groups, not individuals" },
+  { id: "singlingOut",          label: "Singling Out Attack",        short: "Singling Out",  icon: <Fingerprint className="h-4 w-4" />, description: "GDPR Article 4(1) — Minimal attribute combination sufficient to isolate one record" },
+  { id: "inference",            label: "Inference Attack",           short: "Inference",     icon: <Brain className="h-4 w-4" />,       description: "ML Prediction — CART decision tree predicts sensitive attributes from quasi-identifiers" },
+  { id: "membership",           label: "Membership Attack",          short: "Membership",    icon: <UserCheck className="h-4 w-4" />,   description: "Presence Detection — AUC-based test: can attacker tell if a record is in the dataset?" },
+  { id: "recordLinkage",        label: "Record Linkage Attack",      short: "Rec. Linkage",  icon: <Network className="h-4 w-4" />,     description: "External Re-ID — Links anonymized records to an external dataset using quasi-identifiers" },
+  { id: "attributeDisclosure",  label: "Attribute Disclosure Attack", short: "Attr. Disclose", icon: <Shield className="h-4 w-4" />,   description: "Sensitive Inference — Even without re-ID: attacker infers sensitive values from EC distributions" },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -512,6 +518,187 @@ function MembershipReport({ r }: { r: MembershipResult }) {
   );
 }
 
+function RecordLinkageReport({ r }: { r: RecordLinkageResult }) {
+  const linkedPct = r.totalRecords > 0 ? ((r.linkedRecords / r.totalRecords) * 100).toFixed(1) : "0.0";
+  const perfectPct = r.totalRecords > 0 ? ((r.perfectLinks / r.totalRecords) * 100).toFixed(1) : "0.0";
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {kpiCard("Linkage Risk", `${(r.riskScore * 100).toFixed(1)}%`, "Σ(1/matches) / N", <Network className="h-4 w-4" />, "text-red-600")}
+        {kpiCard("Perfect Links", r.perfectLinks, `${perfectPct}% uniquely linked`, <Fingerprint className="h-4 w-4" />, r.perfectLinks > 0 ? "text-red-600" : "text-green-600")}
+        {kpiCard("Records Linked", `${linkedPct}%`, `${r.linkedRecords} of ${r.totalRecords} linkable`, <Users className="h-4 w-4" />, r.linkedRecords / Math.max(r.totalRecords, 1) > 0.5 ? "text-orange-600" : "text-green-600")}
+        {kpiCard("Avg Match Size", r.avgMatchSize.toFixed(1), "External matches per record", <BarChart3 className="h-4 w-4" />)}
+      </div>
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Link Risk Score Distribution</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={r.linkRiskHistogram}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip {...CHART_TOOLTIP} />
+                <Bar dataKey="count" name="Records" radius={[4, 4, 0, 0]}>
+                  {r.linkRiskHistogram.map((_, i) => (
+                    <Cell key={i} fill={i === 0 ? "#16A34A" : i < 3 ? "#D97706" : i === 4 ? "#EA580C" : "#DC2626"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-sm">External Match Count Distribution</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={r.externalMatchDistribution}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="matches" tick={{ fontSize: 11 }} label={{ value: "# External Matches", position: "insideBottom", offset: -2, fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip {...CHART_TOOLTIP} />
+                <Bar dataKey="count" name="Records" radius={[4, 4, 0, 0]}>
+                  {r.externalMatchDistribution.map((d, i) => (
+                    <Cell key={i} fill={d.risk === "SAFE" ? "#16A34A" : d.risk === "CRITICAL" ? "#DC2626" : d.risk === "HIGH" ? "#EA580C" : "#D97706"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Linkage Status Breakdown</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={r.riskDonut} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={2} dataKey="value">
+                  <Cell fill="#DC2626" />
+                  <Cell fill="#EA580C" />
+                  <Cell fill="#16A34A" />
+                </Pie>
+                <Tooltip {...CHART_TOOLTIP} />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Top Vulnerable Records (Highest Link Score)</CardTitle></CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[200px]">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b"><th className="text-left pb-1">QI Combination</th><th className="text-right pb-1">Matches</th><th className="text-right pb-1">Link Score</th></tr></thead>
+                <tbody>
+                  {r.topVulnerable.map((row, i) => (
+                    <tr key={i} className="border-b border-muted">
+                      <td className="py-1 pr-2 text-muted-foreground truncate max-w-[200px]">{row.qiCombo}</td>
+                      <td className="py-1 text-right">{row.matchCount}</td>
+                      <td className="py-1 text-right font-bold text-red-600">{row.linkScore}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </div>
+      <RecommendationsCard recs={r.recommendations} />
+    </div>
+  );
+}
+
+function AttributeDisclosureReport({ r }: { r: AttributeDisclosureResult }) {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {kpiCard("Disclosure Risk", `${(r.riskScore * 100).toFixed(1)}%`, "Weighted Pmax across ECs", <Shield className="h-4 w-4" />, "text-red-600")}
+        {kpiCard("Worst-Case Pmax", `${(r.worstCaseProb * 100).toFixed(0)}%`, "Max single-group confidence", <AlertTriangle className="h-4 w-4" />, r.worstCaseProb > 0.8 ? "text-red-600" : r.worstCaseProb > 0.6 ? "text-orange-600" : "text-green-600")}
+        {kpiCard("High-Risk Groups", r.highRiskGroups, `of ${r.totalGroups} total groups (Pmax > 60%)`, <XCircle className="h-4 w-4" />, r.highRiskGroups > 0 ? "text-orange-600" : "text-green-600")}
+        {kpiCard("Entropy Risk", `${(r.entropyRisk * 100).toFixed(0)}%`, "1 − H_observed/H_max (avg)", <BarChart3 className="h-4 w-4" />, r.entropyRisk > 0.5 ? "text-red-600" : "text-green-600")}
+      </div>
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Dominant Probability Distribution (Pmax per Group)</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={r.dominantProbHistogram}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip {...CHART_TOOLTIP} />
+                <Bar dataKey="count" name="Groups" radius={[4, 4, 0, 0]}>
+                  {r.dominantProbHistogram.map((_, i) => (
+                    <Cell key={i} fill={["#16A34A", "#D97706", "#EA580C", "#DC2626"][i] || "#DC2626"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Top Sensitive Values (Global Frequency)</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={r.topSensitiveValues} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis type="number" tick={{ fontSize: 11 }} unit="%" />
+                <YAxis type="category" dataKey="value" tick={{ fontSize: 10 }} width={100} />
+                <Tooltip {...CHART_TOOLTIP} formatter={(v: number) => `${v}%`} />
+                <Bar dataKey="groupPct" fill="#7C3AED" radius={[0, 4, 4, 0]} name="% of Records" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        {r.perSAResults.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-sm">Per Sensitive Attribute Risk</CardTitle></CardHeader>
+            <CardContent>
+              <table className="w-full text-xs">
+                <thead><tr className="border-b"><th className="text-left pb-2">Attribute</th><th className="text-right pb-2">Avg Pmax</th><th className="text-right pb-2">Worst Pmax</th><th className="text-right pb-2">Entropy Risk</th><th className="text-right pb-2">High-Risk Groups</th><th className="text-right pb-2">Risk Level</th></tr></thead>
+                <tbody>
+                  {r.perSAResults.map((sa, i) => (
+                    <tr key={i} className="border-b border-muted">
+                      <td className="py-1.5 font-medium">{sa.sa}</td>
+                      <td className="py-1.5 text-right">{(sa.avgDominantProb * 100).toFixed(0)}%</td>
+                      <td className="py-1.5 text-right font-bold" style={{ color: sa.worstCaseProb > 0.6 ? "#DC2626" : "#16A34A" }}>{(sa.worstCaseProb * 100).toFixed(0)}%</td>
+                      <td className="py-1.5 text-right">{(sa.entropyRisk * 100).toFixed(0)}%</td>
+                      <td className="py-1.5 text-right">{sa.highRiskGroups}</td>
+                      <td className="py-1.5 text-right">{riskBadge(sa.riskLevel)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Top High-Risk Groups (Sorted by Pmax)</CardTitle></CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[220px]">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b"><th className="text-left pb-1">QI Combination</th><th className="text-right pb-1">Size</th><th className="text-right pb-1">Dominant Value</th><th className="text-right pb-1">Pmax</th><th className="text-right pb-1">H Risk</th><th className="text-right pb-1">Level</th></tr></thead>
+                <tbody>
+                  {r.perGroupRisks.slice(0, 12).map((g, i) => (
+                    <tr key={i} className="border-b border-muted">
+                      <td className="py-1 pr-2 text-muted-foreground truncate max-w-[160px]">{g.qiCombo.slice(0, 40)}</td>
+                      <td className="py-1 text-right">{g.size}</td>
+                      <td className="py-1 text-right text-muted-foreground">{g.dominantValue.slice(0, 15)}</td>
+                      <td className="py-1 text-right font-bold" style={{ color: g.dominantProb > 0.6 ? "#DC2626" : "#16A34A" }}>{(g.dominantProb * 100).toFixed(0)}%</td>
+                      <td className="py-1 text-right">{(g.entropyRisk * 100).toFixed(0)}%</td>
+                      <td className="py-1 text-right">{riskBadge(g.riskLevel)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </div>
+      <RecommendationsCard recs={r.recommendations} />
+    </div>
+  );
+}
+
 function RecommendationsCard({ recs }: { recs: string[] }) {
   return (
     <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
@@ -552,12 +739,14 @@ function ComparisonDashboard({ results }: { results: AllResults }) {
   }));
 
   const tableRows = [
-    { attack: "Prosecutor", result: results.prosecutor, key: "prosecutor" as AttackId, threat: "Record linkage", metric: results.prosecutor ? `${results.prosecutor.uniqueRecordsCount} unique records` : "—" },
-    { attack: "Journalist", result: results.journalist, key: "journalist" as AttackId, threat: "QI violations", metric: results.journalist ? `${results.journalist.violations} violations` : "—" },
-    { attack: "Marketer", result: results.marketer, key: "marketer" as AttackId, threat: "Attribute disclosure", metric: results.marketer ? `${(results.marketer.lDiversityPassRate * 100).toFixed(0)}% L-div pass` : "—" },
-    { attack: "Singling Out", result: results.singlingOut, key: "singlingOut" as AttackId, threat: "GDPR/DPDP exposure", metric: results.singlingOut ? `${results.singlingOut.singulableCount} singulable` : "—" },
-    { attack: "Inference", result: results.inference, key: "inference" as AttackId, threat: "AI prediction", metric: results.inference ? `${results.inference.infoGain}% info gain` : "—" },
-    { attack: "Membership", result: results.membership, key: "membership" as AttackId, threat: "Presence detection", metric: results.membership ? `AUC ${results.membership.aucScore.toFixed(2)}` : "—" },
+    { attack: "Prosecutor",           result: results.prosecutor,           key: "prosecutor" as AttackId,           threat: "Within-dataset re-ID",       metric: results.prosecutor ? `${results.prosecutor.uniqueRecordsCount} unique records` : "—" },
+    { attack: "Journalist",           result: results.journalist,           key: "journalist" as AttackId,           threat: "QI violations",               metric: results.journalist ? `${results.journalist.violations} violations` : "—" },
+    { attack: "Marketer",             result: results.marketer,             key: "marketer" as AttackId,             threat: "Group attribute disclosure",   metric: results.marketer ? `${(results.marketer.lDiversityPassRate * 100).toFixed(0)}% L-div pass` : "—" },
+    { attack: "Singling Out",         result: results.singlingOut,          key: "singlingOut" as AttackId,          threat: "GDPR/DPDP singling-out",      metric: results.singlingOut ? `${results.singlingOut.singulableCount} singulable` : "—" },
+    { attack: "Inference",            result: results.inference,            key: "inference" as AttackId,            threat: "ML attribute prediction",     metric: results.inference ? `${results.inference.infoGain}% info gain` : "—" },
+    { attack: "Membership",           result: results.membership,           key: "membership" as AttackId,           threat: "Presence detection",          metric: results.membership ? `AUC ${results.membership.aucScore.toFixed(2)}` : "—" },
+    { attack: "Record Linkage",       result: results.recordLinkage,        key: "recordLinkage" as AttackId,        threat: "External dataset re-ID",      metric: results.recordLinkage ? `${results.recordLinkage.perfectLinks} perfect links` : "—" },
+    { attack: "Attr. Disclosure",     result: results.attributeDisclosure,  key: "attributeDisclosure" as AttackId,  threat: "Sensitive value inference",   metric: results.attributeDisclosure ? `Pmax ${(results.attributeDisclosure.worstCaseProb * 100).toFixed(0)}%` : "—" },
   ];
 
   const scoreColor = c.score >= 70 ? "text-red-600" : c.score >= 50 ? "text-orange-600" : c.score >= 30 ? "text-amber-600" : "text-green-600";
@@ -737,12 +926,14 @@ export default function RiskPage() {
 
     const steps: { id: string; label: string; fn: () => void }[] = [];
 
-    if (selectedAttacks.includes("prosecutor")) steps.push({ id: "prosecutor", label: "Prosecutor Attack (Record Linkage)...", fn: () => { newResults.prosecutor = runProsecutorAttack(rawData, quasiIdentifiers, kThreshold[0]); } });
-    if (selectedAttacks.includes("journalist")) steps.push({ id: "journalist", label: "Journalist Attack (Probabilistic Re-ID)...", fn: () => { newResults.journalist = runJournalistAttack(rawData, quasiIdentifiers, kThreshold[0]); } });
-    if (selectedAttacks.includes("marketer")) steps.push({ id: "marketer", label: "Marketer Attack (Attribute Disclosure)...", fn: () => { newResults.marketer = runMarketerAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0], tVal); } });
-    if (selectedAttacks.includes("singlingOut")) steps.push({ id: "singlingOut", label: "Singling Out Attack (GDPR Standard)...", fn: () => { newResults.singlingOut = runSingleOutAttack(rawData, allCols, kThreshold[0]); } });
-    if (selectedAttacks.includes("inference")) steps.push({ id: "inference", label: "Inference Attack (ML Decision Tree)...", fn: () => { newResults.inference = runInferenceAttack(rawData, quasiIdentifiers, sensitiveAttributes); } });
-    if (selectedAttacks.includes("membership")) steps.push({ id: "membership", label: "Membership Attack (Presence Detection)...", fn: () => { newResults.membership = runMembershipAttack(rawData, quasiIdentifiers); } });
+    if (selectedAttacks.includes("prosecutor"))          steps.push({ id: "prosecutor",          label: "Prosecutor Attack (Within-Dataset Re-ID)...",         fn: () => { newResults.prosecutor          = runProsecutorAttack(rawData, quasiIdentifiers, kThreshold[0]); } });
+    if (selectedAttacks.includes("journalist"))          steps.push({ id: "journalist",          label: "Journalist Attack (Probabilistic Re-ID)...",           fn: () => { newResults.journalist          = runJournalistAttack(rawData, quasiIdentifiers, kThreshold[0]); } });
+    if (selectedAttacks.includes("marketer"))            steps.push({ id: "marketer",            label: "Marketer Attack (L-Diversity & T-Closeness)...",       fn: () => { newResults.marketer            = runMarketerAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0], tVal); } });
+    if (selectedAttacks.includes("singlingOut"))         steps.push({ id: "singlingOut",         label: "Singling Out Attack (GDPR Singling-Out Standard)...",   fn: () => { newResults.singlingOut         = runSingleOutAttack(rawData, allCols, kThreshold[0]); } });
+    if (selectedAttacks.includes("inference"))           steps.push({ id: "inference",           label: "Inference Attack (CART Decision Tree)...",              fn: () => { newResults.inference           = runInferenceAttack(rawData, quasiIdentifiers, sensitiveAttributes); } });
+    if (selectedAttacks.includes("membership"))          steps.push({ id: "membership",          label: "Membership Attack (AUC Presence Detection)...",         fn: () => { newResults.membership          = runMembershipAttack(rawData, quasiIdentifiers); } });
+    if (selectedAttacks.includes("recordLinkage"))       steps.push({ id: "recordLinkage",       label: "Record Linkage Attack (External Dataset Re-ID)...",     fn: () => { newResults.recordLinkage       = runRecordLinkageAttack(rawData, quasiIdentifiers); } });
+    if (selectedAttacks.includes("attributeDisclosure")) steps.push({ id: "attributeDisclosure", label: "Attribute Disclosure Attack (Sensitive Inference)...",  fn: () => { newResults.attributeDisclosure = runAttributeDisclosureAttack(rawData, quasiIdentifiers, sensitiveAttributes); } });
 
     for (let i = 0; i < steps.length; i++) {
       setProgress({ step: `${i + 1}/${steps.length}: Running ${steps[i].label}`, pct: Math.round((i / steps.length) * 100) });
@@ -754,12 +945,14 @@ export default function RiskPage() {
 
     // Composite score
     newResults.composite = computeCompositeScore({
-      prosecutor: newResults.prosecutor?.riskScore ?? 0,
-      journalist: newResults.journalist?.riskScore ?? 0,
-      marketer: newResults.marketer?.riskScore ?? 0,
-      singlingOut: newResults.singlingOut?.riskScore ?? 0,
-      inference: newResults.inference?.riskScore ?? 0,
-      membership: newResults.membership?.riskScore ?? 0,
+      prosecutor:          newResults.prosecutor?.riskScore          ?? 0,
+      journalist:          newResults.journalist?.riskScore          ?? 0,
+      marketer:            newResults.marketer?.riskScore            ?? 0,
+      singlingOut:         newResults.singlingOut?.riskScore         ?? 0,
+      inference:           newResults.inference?.riskScore           ?? 0,
+      membership:          newResults.membership?.riskScore          ?? 0,
+      recordLinkage:       newResults.recordLinkage?.riskScore       ?? 0,
+      attributeDisclosure: newResults.attributeDisclosure?.riskScore ?? 0,
     });
 
     setResults(newResults);
@@ -900,7 +1093,7 @@ export default function RiskPage() {
               <Network className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-1">No Assessment Results Yet</h3>
               <p className="text-sm text-muted-foreground max-w-sm">
-                Select a dataset, configure quasi-identifiers and sensitive attributes, then click <strong>Run Assessment</strong> to analyse privacy risks across all 6 attack types.
+                Select a dataset, configure quasi-identifiers and sensitive attributes, then click <strong>Run Assessment</strong> to analyse privacy risks across all 8 attack types.
               </p>
             </Card>
           ) : (
@@ -939,12 +1132,14 @@ export default function RiskPage() {
                   </Card>
                   {results[a.id] ? (
                     <>
-                      {a.id === "prosecutor" && <ProsecutorReport r={results.prosecutor!} />}
-                      {a.id === "journalist" && <JournalistReport r={results.journalist!} />}
-                      {a.id === "marketer" && <MarketerReport r={results.marketer!} />}
-                      {a.id === "singlingOut" && <SinglingOutReport r={results.singlingOut!} />}
-                      {a.id === "inference" && <InferenceReport r={results.inference!} />}
-                      {a.id === "membership" && <MembershipReport r={results.membership!} />}
+                      {a.id === "prosecutor"          && <ProsecutorReport r={results.prosecutor!} />}
+                      {a.id === "journalist"          && <JournalistReport r={results.journalist!} />}
+                      {a.id === "marketer"            && <MarketerReport r={results.marketer!} />}
+                      {a.id === "singlingOut"         && <SinglingOutReport r={results.singlingOut!} />}
+                      {a.id === "inference"           && <InferenceReport r={results.inference!} />}
+                      {a.id === "membership"          && <MembershipReport r={results.membership!} />}
+                      {a.id === "recordLinkage"       && <RecordLinkageReport r={results.recordLinkage!} />}
+                      {a.id === "attributeDisclosure" && <AttributeDisclosureReport r={results.attributeDisclosure!} />}
                     </>
                   ) : (
                     <Card className="flex items-center justify-center py-12 text-muted-foreground text-sm">
