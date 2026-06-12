@@ -1517,36 +1517,382 @@ function MarketerReport({ r }: { r: MarketerResult }) {
 }
 
 function SinglingOutReport({ r }: { r: SingleOutResult }) {
+  const [recordFilter, setRecordFilter] = useState<"all" | "singled" | "partial" | "protected">("all");
+  const [recordPage, setRecordPage] = useState(0);
+  const PAGE_SIZE = 50;
+
+  const qiList = r.quasiIdentifiers.join(", ") || "—";
+  const riskColor = r.riskLevel === "HIGH" ? "#DC2626" : r.riskLevel === "MEDIUM" ? "#D97706" : "#16A34A";
+  const riskEmoji = r.riskLevel === "HIGH" ? "🔴" : r.riskLevel === "MEDIUM" ? "🟡" : "🟢";
+
+  const soRateColor = (rate: number) => rate > 20 ? "#DC2626" : rate > 5 ? "#D97706" : "#16A34A";
+
+  // Top solo column
+  const topSoloEntry = Object.entries(r.soloSoCounts).sort((a, b) => b[1] - a[1])[0];
+  // Top dangerous pair
+  const topPairSubset = r.topDangerousSubsets.find((s) => s.subsetSize === 2);
+  // Top narrative subset (most singling-out records)
+  const topNarrativeSubset = r.topDangerousSubsets[0];
+  const topVulnRecord = r.topVulnerable[0];
+
+  // Filtered + paginated records
+  const filteredRecords = r.allRecords.filter((rec) => {
+    if (recordFilter === "singled") return rec.status === "SINGLED_OUT";
+    if (recordFilter === "partial") return rec.status === "PARTIALLY_ISOLATED";
+    if (recordFilter === "protected") return rec.status === "PROTECTED";
+    return true;
+  });
+  const pageCount = Math.ceil(filteredRecords.length / PAGE_SIZE);
+  const pageRecords = filteredRecords.slice(recordPage * PAGE_SIZE, (recordPage + 1) * PAGE_SIZE);
+
+  // Donut data
+  const donutData = [
+    { name: "Singled Out", value: r.atRiskCount, fill: "#DC2626" },
+    { name: "Protected", value: r.protectedCount, fill: "#16A34A" },
+  ];
+
+  // EC dist chart data
+  const ecChartData = r.ecDistribution.map((b) => ({
+    name: b.sizeLabel,
+    records: b.numRecords,
+    ecs: b.numECs,
+    fill: b.minSize === 1 ? "#DC2626" : b.minSize <= 4 ? "#EA580C" : b.minSize <= 10 ? "#D97706" : "#16A34A",
+  }));
+
+  // SO score dist chart
+  const soScoreChartData = r.soScoreDistribution.map((b, i) => ({
+    name: b.label.split(" ")[0],
+    count: b.count,
+    fill: ["#DC2626", "#EA580C", "#D97706", "#2563EB", "#16A34A"][i],
+  }));
+
+  // Solo column chart
+  const soloChartData = Object.entries(r.soloSoCounts)
+    .map(([col, cnt]) => ({ col, rate: r.N > 0 ? Math.round((cnt / r.N) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.rate - a.rate);
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCard("Singling Out Rate", `${(r.singlingOutRate * 100).toFixed(1)}%`, `${r.singulableCount} of ${r.totalRecords} records`, <Fingerprint className="h-4 w-4" />, r.singlingOutRate > 0.3 ? "text-red-600" : "text-green-600")}
-        {kpiCard("Avg Footprint", r.avgFootprint.toFixed(1), "Attributes needed on avg", <BarChart3 className="h-4 w-4" />)}
-        {kpiCard("GDPR Status", r.gdprStatus, r.gdprStatus === "FAIL" ? "Singling-out standard violated" : "Meets singling-out standard", <Shield className="h-4 w-4" />, r.gdprStatus === "FAIL" ? "text-red-600" : "text-green-600")}
-        {kpiCard("Safe Records", r.totalRecords - r.singulableCount, "Cannot be uniquely singled out", <CheckCircle className="h-4 w-4" />, "text-green-600")}
+
+      {/* §4.1 Attack Summary Banner */}
+      <Card className="border-2" style={{ borderColor: riskColor }}>
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">{riskEmoji}</div>
+              <div>
+                <div className="font-bold text-base">SINGLING OUT ATTACK RESULTS</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Dataset: <strong>{r.N.toLocaleString()} rows analysed</strong> &nbsp;|&nbsp;
+                  QIs used: <strong>{qiList}</strong> &nbsp;|&nbsp;
+                  Subsets tested: <strong>{r.totalSubsetsTested}</strong> (max 3 columns)
+                </div>
+              </div>
+            </div>
+            <Badge style={{ backgroundColor: riskColor, color: "#fff" }} className="text-sm px-3 py-1">
+              RISK LEVEL: {r.riskLevel}
+            </Badge>
+          </div>
+          <div className="mt-3 p-3 bg-white/60 dark:bg-black/20 rounded text-sm border">
+            An attacker with <strong>only the released CSV file</strong> (no external data needed) can write a simple database query
+            that isolates exactly ONE person for <strong style={{ color: riskColor }}>{r.predicateSoRate.toFixed(1)}%</strong> of records
+            — that is <strong>{r.atRiskCount.toLocaleString()}</strong> out of <strong>{r.N.toLocaleString()}</strong> individuals.{" "}
+            <strong>{r.numSingletons}</strong> records are uniquely identified by their combination of all selected QI values alone.
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* §4.2 Key Metrics Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        {kpiCard(
+          "Predicate SO Rate",
+          `${r.predicateSoRate.toFixed(1)}%`,
+          "% isolatable by a simple predicate query",
+          <Fingerprint className="h-4 w-4" />,
+          r.predicateSoRate > 20 ? "text-red-600" : r.predicateSoRate > 5 ? "text-amber-600" : "text-green-600"
+        )}
+        {kpiCard(
+          "Probabilistic SO Rate",
+          `${r.probSoRate.toFixed(1)}%`,
+          "Expected % isolatable via statistical inference",
+          <Brain className="h-4 w-4" />,
+          r.probSoRate > 20 ? "text-red-600" : r.probSoRate > 5 ? "text-amber-600" : "text-green-600"
+        )}
+        {kpiCard(
+          "Singled-Out Records",
+          r.atRiskCount.toLocaleString(),
+          "Isolated by at least one QI subset",
+          <AlertTriangle className="h-4 w-4" />,
+          r.atRiskCount > 0 ? "text-red-600" : "text-green-600"
+        )}
+        {kpiCard(
+          "Full-QI Singletons",
+          r.numSingletons.toLocaleString(),
+          "Unique under ALL selected QIs",
+          <Target className="h-4 w-4" />,
+          r.numSingletons > 0 ? "text-red-600" : "text-green-600"
+        )}
+        {kpiCard(
+          "Subsets Tested",
+          r.totalSubsetsTested.toLocaleString(),
+          "QI combinations evaluated",
+          <BarChart3 className="h-4 w-4" />,
+          "text-blue-600"
+        )}
+        {kpiCard(
+          "Min-K",
+          r.minK,
+          "Smallest equivalence class found",
+          <Shield className="h-4 w-4" />,
+          r.minK < 2 ? "text-red-600" : r.minK < 5 ? "text-amber-600" : "text-green-600"
+        )}
       </div>
+
+      {/* §4.11 Risk Protection Donut + §4.5 EC Distribution */}
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
-          <CardHeader><CardTitle className="text-sm">Privacy Footprint Histogram</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">Singled Out vs Protected</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={r.footprintHistogram}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="count" fill="#7C3AED" radius={[4, 4, 0, 0]} name="Records" />
-              </BarChart>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={donutData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} dataKey="value" paddingAngle={3}>
+                  {donutData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                </Pie>
+                <Tooltip formatter={(v: number) => `${v.toLocaleString()} records`} />
+                <Legend />
+              </PieChart>
             </ResponsiveContainer>
+            <div className="text-xs text-muted-foreground mt-2 text-center">
+              <span className="text-red-600 font-semibold">{r.atRiskCount.toLocaleString()} Singled Out</span>
+              {" — isolated by at least one QI predicate. "}
+              <span className="text-green-600 font-semibold">{r.protectedCount.toLocaleString()} Protected</span>
+              {" — no combination of up to 3 QI columns tested isolates these records."}
+            </div>
           </CardContent>
         </Card>
+
         <Card>
-          <CardHeader><CardTitle className="text-sm">Attack Effort Curve</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-sm">Equivalence Class Size Distribution</CardTitle>
+            <CardDescription className="text-xs">
+              ← 🔴 Size=1 records can be isolated by a single predicate query. No external data needed.
+            </CardDescription>
+          </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={ecChartData} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis type="number" tick={{ fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={115} />
+                <Tooltip {...CHART_TOOLTIP} />
+                <Bar dataKey="records" name="Records" radius={[0, 4, 4, 0]}>
+                  {ecChartData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <table className="w-full text-xs mt-2">
+              <thead><tr className="border-b">
+                <th className="text-left pb-1">EC Size</th>
+                <th className="text-right pb-1"># ECs</th>
+                <th className="text-right pb-1"># Records</th>
+                <th className="text-right pb-1">% Dataset</th>
+              </tr></thead>
+              <tbody>
+                {r.ecDistribution.map((b, i) => (
+                  <tr key={i} className="border-b border-muted">
+                    <td className="py-1 font-medium">{b.sizeLabel}</td>
+                    <td className="py-1 text-right">{b.numECs}</td>
+                    <td className="py-1 text-right font-bold">{b.numRecords}</td>
+                    <td className="py-1 text-right">{b.pctDataset}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* §4.4 Attack Narrative */}
+      {topNarrativeSubset && topVulnRecord && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm">🔍 Attack Simulation — How the Singling Out Attack Works on YOUR Data</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-purple-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 1 — Attacker's Starting Point</div>
+              The attacker has <strong>ONLY the released CSV file</strong>. No external databases. No knowledge of who is in the dataset.
+              They write automated queries — trying every 1-column, 2-column, and 3-column combination of [<em>{qiList}</em>] to find queries that return exactly 1 row.
+            </div>
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-red-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 2 — Finding a Singling-Out Predicate</div>
+              The attacker tests the combination: <strong>[{topNarrativeSubset.subset.join(", ")}]</strong>
+              <br />Query: "Show me records where {topNarrativeSubset.subset.map((c) => `${c} = [value]`).join(" AND ")}"
+              <br />Result: <strong>{topNarrativeSubset.soCount} record{topNarrativeSubset.soCount !== 1 ? "s" : ""} singled out</strong> ({topNarrativeSubset.soRate.toFixed(1)}% of dataset) — exactly ONE match for each.
+            </div>
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-orange-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 3 — What the Attacker Now Knows</div>
+              Without any external data, the attacker has isolated unique individuals.
+              From each record, they can now read <strong>all columns — including sensitive ones</strong>.
+              Even if these columns were anonymised, the attacker can track these unique profiles across future dataset releases.
+              <br />Most isolating predicate found: <code className="text-xs bg-muted px-1 rounded">{topVulnRecord.mostIsolatingPredicate}</code>
+            </div>
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-amber-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 4 — Scale of Singling Out</div>
+              The attacker ran <strong>{r.totalSubsetsTested}</strong> queries automatically.{" "}
+              <strong>{r.atRiskCount} records ({r.predicateSoRate.toFixed(1)}%)</strong> were singled out by at least one of these queries.
+              {topPairSubset && (
+                <> The most dangerous column pair found: <strong>[{topPairSubset.subset.join(", ")}]</strong> — singles out <strong>{topPairSubset.soCount} records</strong> with just 2 columns.</>
+              )}
+            </div>
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-blue-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 5 — Why This Requires No External Data</div>
+              Unlike the Prosecutor or Marketer attacks, the attacker here never leaves the dataset. The risk is entirely internal — a consequence of rare or unique QI combinations within the released file itself.
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §4.7 Dangerous Column Combinations */}
+      {r.topDangerousSubsets.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Dangerous Column Combinations (Ranked by Records Singled Out)</CardTitle>
+            <CardDescription className="text-xs">
+              Columns at the top are the ones the data custodian should prioritise for generalisation or suppression.
+              Even a single high-cardinality column can single out every record on its own.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left pb-2">Rank</th>
+                  <th className="text-left pb-2">Column Combination</th>
+                  <th className="text-right pb-2"># Records Singled Out</th>
+                  <th className="text-right pb-2">SO Rate</th>
+                  <th className="text-right pb-2">Subset Size</th>
+                  <th className="text-right pb-2">Min EC Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.topDangerousSubsets.map((s, i) => (
+                  <tr key={i} className="border-b border-muted">
+                    <td className="py-1.5 font-bold text-muted-foreground">#{i + 1}</td>
+                    <td className="py-1.5 font-medium">{s.subset.join(" + ")}</td>
+                    <td className="py-1.5 text-right font-bold" style={{ color: soRateColor(s.soRate) }}>
+                      {s.soCount.toLocaleString()}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      <Badge variant="outline" style={{ color: soRateColor(s.soRate), borderColor: soRateColor(s.soRate) }} className="text-xs">
+                        {s.soRate.toFixed(1)}%
+                      </Badge>
+                    </td>
+                    <td className="py-1.5 text-right">{s.subsetSize}</td>
+                    <td className="py-1.5 text-right">{s.minEcSize}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §4.8 Per-Column Singling Out Power */}
+      {soloChartData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Per-Column Singling Out Power</CardTitle>
+            <CardDescription className="text-xs">
+              Records singled out when ONLY this column is used as the predicate.
+              A column with Solo SO Rate &gt; 0% is a de-facto direct identifier — it alone can isolate unique individuals without combining with any other column.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={Math.max(120, soloChartData.length * 28)}>
+              <BarChart data={soloChartData} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis type="number" tick={{ fontSize: 10 }} unit="%" tickFormatter={(v) => `${v}%`} />
+                <YAxis type="category" dataKey="col" tick={{ fontSize: 10 }} width={130} />
+                <Tooltip {...CHART_TOOLTIP} formatter={(v: number) => `${v}%`} />
+                <Bar dataKey="rate" name="Solo SO Rate" radius={[0, 4, 4, 0]}>
+                  {soloChartData.map((entry, i) => (
+                    <Cell key={i} fill={soRateColor(entry.rate)} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <table className="w-full text-xs mt-3">
+              <thead><tr className="border-b">
+                <th className="text-left pb-1">Column</th>
+                <th className="text-right pb-1">Records Singled Out (solo)</th>
+                <th className="text-right pb-1">Solo SO Rate</th>
+                <th className="text-right pb-1">Verdict</th>
+              </tr></thead>
+              <tbody>
+                {soloChartData.map((row, i) => (
+                  <tr key={i} className="border-b border-muted">
+                    <td className="py-1 font-medium">{row.col}</td>
+                    <td className="py-1 text-right">{(r.soloSoCounts[row.col] ?? 0).toLocaleString()}</td>
+                    <td className="py-1 text-right font-bold" style={{ color: soRateColor(row.rate) }}>{row.rate.toFixed(1)}%</td>
+                    <td className="py-1 text-right text-xs">
+                      {row.rate > 20 ? <span className="text-red-600 font-semibold">🔴 Direct Identifier</span>
+                        : row.rate > 5 ? <span className="text-amber-600">🟡 High Cardinality</span>
+                        : row.rate > 0 ? <span className="text-amber-500">🟡 Some Risk</span>
+                        : <span className="text-green-600">🟢 Safe alone</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §4.6 SO Score Distribution */}
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader><CardTitle className="text-sm">SO Score Distribution</CardTitle>
+            <CardDescription className="text-xs">Fraction of tested QI subsets that isolate each record</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={soScoreChartData}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="name" tick={{ fontSize: 9 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip {...CHART_TOOLTIP} />
+                <Bar dataKey="count" name="Records" radius={[4, 4, 0, 0]}>
+                  {soScoreChartData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <table className="w-full text-xs mt-2">
+              <thead><tr className="border-b">
+                <th className="text-left pb-1">SO Score Range</th>
+                <th className="text-right pb-1"># Records</th>
+                <th className="text-left pb-1 pl-2">Meaning</th>
+              </tr></thead>
+              <tbody>
+                {r.soScoreDistribution.map((b, i) => (
+                  <tr key={i} className="border-b border-muted">
+                    <td className="py-1 font-mono text-xs">{b.label}</td>
+                    <td className="py-1 text-right font-bold">{b.count}</td>
+                    <td className="py-1 pl-2 text-muted-foreground">{b.meaning}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Attack Effort Curve</CardTitle>
+            <CardDescription className="text-xs">Cumulative % of records singulable using ≤k columns</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={180}>
               <LineChart data={r.effortCurve}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="k" tick={{ fontSize: 11 }} label={{ value: "# Attributes Known", position: "insideBottom", offset: -2, fontSize: 10 }} />
+                <XAxis dataKey="k" tick={{ fontSize: 11 }} label={{ value: "# Columns", position: "insideBottom", offset: -2, fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 11 }} unit="%" />
                 <Tooltip {...CHART_TOOLTIP} />
                 <Line type="monotone" dataKey="pct" stroke="#DC2626" strokeWidth={2} dot name="% Singulable" />
@@ -1554,21 +1900,206 @@ function SinglingOutReport({ r }: { r: SingleOutResult }) {
             </ResponsiveContainer>
           </CardContent>
         </Card>
-        <Card className="md:col-span-2">
-          <CardHeader><CardTitle className="text-sm">Per-Attribute Singulability Score</CardTitle></CardHeader>
+      </div>
+
+      {/* §4.12 Top Vulnerable Records */}
+      {r.topVulnerable.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Top Vulnerable Records (Highest SO Score)</CardTitle>
+            <CardDescription className="text-xs">
+              These rows are the highest priority for suppression or generalisation.
+              "Most Isolating Predicate" shows exactly what query an attacker would write to find them.
+            </CardDescription>
+          </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={r.attrSingulability} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} />
-                <YAxis type="category" dataKey="attr" tick={{ fontSize: 10 }} width={100} />
-                <Tooltip {...CHART_TOOLTIP} formatter={(v: number) => `${(v * 100).toFixed(1)}%`} />
-                <Bar dataKey="score" fill="#EA580C" radius={[0, 4, 4, 0]} name="Singulability" />
-              </BarChart>
-            </ResponsiveContainer>
+            <ScrollArea className="h-[240px]">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left pb-1">Rank</th>
+                    <th className="text-right pb-1">EC Size</th>
+                    <th className="text-right pb-1">SO Score</th>
+                    <th className="text-right pb-1">Prob SO Score</th>
+                    <th className="text-left pb-1 pl-2">Most Isolating Predicate</th>
+                    <th className="text-right pb-1">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.topVulnerable.map((rec, i) => (
+                    <tr key={i} className="border-b border-muted">
+                      <td className="py-1.5 font-bold text-muted-foreground">#{i + 1}</td>
+                      <td className="py-1.5 text-right">{rec.ecSize}</td>
+                      <td className="py-1.5 text-right font-bold" style={{ color: soRateColor(rec.soScore * 100) }}>
+                        {rec.soScore.toFixed(2)}
+                      </td>
+                      <td className="py-1.5 text-right">{rec.probSoScore.toFixed(2)}</td>
+                      <td className="py-1.5 pl-2 font-mono text-xs truncate max-w-[200px]" title={rec.mostIsolatingPredicate}>
+                        {rec.mostIsolatingPredicate}
+                      </td>
+                      <td className="py-1.5 text-right text-xs font-semibold">
+                        {rec.status === "SINGLED_OUT"       && <span className="text-red-600">🔴 SINGLED OUT</span>}
+                        {rec.status === "PARTIALLY_ISOLATED" && <span className="text-amber-600">🟡 PARTIALLY ISOLATED</span>}
+                        {rec.status === "PROTECTED"          && <span className="text-green-600">🟢 PROTECTED</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollArea>
           </CardContent>
         </Card>
-      </div>
+      )}
+
+      {/* §4.3 Record-Level Trace Table */}
+      {r.allRecords.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Record-Level Singling Out Trace</CardTitle>
+            <CardDescription className="text-xs">
+              Full dataset trace — EC Size, SO Score, Prob SO Score, and isolation status for every record.
+            </CardDescription>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {(["all", "singled", "partial", "protected"] as const).map((f) => (
+                <Button key={f} size="sm" variant={recordFilter === f ? "default" : "outline"} className="text-xs h-7"
+                  onClick={() => { setRecordFilter(f); setRecordPage(0); }}>
+                  {f === "all" ? "Show All" : f === "singled" ? "🔴 Singled Out" : f === "partial" ? "🟡 Partially Isolated" : "🟢 Protected"}
+                </Button>
+              ))}
+              <span className="text-xs text-muted-foreground self-center ml-2">{filteredRecords.length} records</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[280px]">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-right pb-1">Row #</th>
+                    {r.quasiIdentifiers.slice(0, 4).map((qi) => (
+                      <th key={qi} className="text-right pb-1 pl-1">{qi}</th>
+                    ))}
+                    <th className="text-right pb-1">EC Size</th>
+                    <th className="text-right pb-1">SO Score</th>
+                    <th className="text-right pb-1">Prob SO</th>
+                    <th className="text-right pb-1">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRecords.map((rec, i) => (
+                    <tr key={i} className={`border-b border-muted ${rec.status === "SINGLED_OUT" ? "bg-red-50 dark:bg-red-950/20" : rec.status === "PARTIALLY_ISOLATED" ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
+                      <td className="py-1 text-right text-muted-foreground">{rec.rowIndex}</td>
+                      {r.quasiIdentifiers.slice(0, 4).map((qi) => (
+                        <td key={qi} className="py-1 text-right pl-1 truncate max-w-[80px]" title={rec.qiValues[qi]}>
+                          {(rec.qiValues[qi] ?? "").slice(0, 12)}
+                        </td>
+                      ))}
+                      <td className="py-1 text-right font-medium">{rec.ecSize}</td>
+                      <td className="py-1 text-right font-bold" style={{ color: soRateColor(rec.soScore * 100) }}>
+                        {rec.soScore.toFixed(2)}
+                      </td>
+                      <td className="py-1 text-right">{rec.probSoScore.toFixed(2)}</td>
+                      <td className="py-1 text-right text-xs font-semibold">
+                        {rec.status === "SINGLED_OUT"        && <span className="text-red-600">🔴</span>}
+                        {rec.status === "PARTIALLY_ISOLATED"  && <span className="text-amber-600">🟡</span>}
+                        {rec.status === "PROTECTED"           && <span className="text-green-600">🟢</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollArea>
+            {pageCount > 1 && (
+              <div className="flex items-center justify-between mt-3 text-xs">
+                <Button size="sm" variant="outline" className="h-7" disabled={recordPage === 0} onClick={() => setRecordPage(p => p - 1)}>
+                  <ChevronLeft className="h-3 w-3 mr-1" /> Prev
+                </Button>
+                <span className="text-muted-foreground">Page {recordPage + 1} of {pageCount}</span>
+                <Button size="sm" variant="outline" className="h-7" disabled={recordPage >= pageCount - 1} onClick={() => setRecordPage(p => p + 1)}>
+                  Next <ChevronRight className="h-3 w-3 ml-1" />
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §4.9 L-Diversity per SA */}
+      {Object.keys(r.lDiversity).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">L-Diversity Check (per Sensitive Attribute)</CardTitle>
+            <CardDescription className="text-xs">
+              Combined Singling Out + L-Diversity risk = records that are BOTH isolated AND in L-Diversity-violating ECs.
+              For these records, an attacker can isolate the individual AND read their sensitive attribute value with 100% certainty.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {Object.entries(r.lDiversity).map(([sa, res]) => {
+              const pct = res.totalECs > 0 ? Math.round(res.violatingECs / res.totalECs * 1000) / 10 : 0;
+              const ldStatus = res.violatingECs === 0 ? "PASS" : res.violatingECs / res.totalECs < 0.5 ? "WARN" : "FAIL";
+              return (
+                <div key={sa} className={`p-3 rounded border ${ldStatus === "FAIL" ? "border-red-300 bg-red-50 dark:bg-red-950/20" : ldStatus === "WARN" ? "border-amber-300 bg-amber-50 dark:bg-amber-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-semibold text-xs">SA: {sa}</div>
+                    <Badge variant="outline" className={`text-xs ${ldStatus === "FAIL" ? "text-red-600 border-red-400" : ldStatus === "WARN" ? "text-amber-600 border-amber-400" : "text-green-600 border-green-400"}`}>
+                      {ldStatus === "FAIL" ? "🔴 FAIL" : ldStatus === "WARN" ? "🟡 WARN" : "🟢 PASS"}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div><div className="text-muted-foreground">Min L (distinct values)</div><div className="font-bold">{res.minL}</div></div>
+                    <div><div className="text-muted-foreground">ECs violating L-Div</div><div className="font-bold text-red-600">{res.violatingECs} / {res.totalECs} ({pct}%)</div></div>
+                    <div><div className="text-muted-foreground">Combined Singling+SA Risk</div><div className="font-bold text-red-600">{res.combinedSinglingRisk} records</div></div>
+                    <div><div className="text-muted-foreground">Consequence</div><div className="text-xs text-muted-foreground">{res.combinedSinglingRisk > 0 ? `Attacker can isolate & read ${sa} with 100% certainty for ${res.combinedSinglingRisk} records` : "No combined risk"}</div></div>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §4.10 T-Closeness per SA */}
+      {Object.keys(r.tCloseness).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">T-Closeness Check (per Sensitive Attribute)</CardTitle>
+            <CardDescription className="text-xs">
+              ECs with high T-Closeness deviation that are also size-1 allow the attacker to infer the SA value with certainty — no distributional uncertainty remains when there is only 1 record.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-xs">
+              <thead><tr className="border-b">
+                <th className="text-left pb-1">Sensitive Attribute</th>
+                <th className="text-right pb-1">Max TVD</th>
+                <th className="text-right pb-1">ECs Violating T</th>
+                <th className="text-right pb-1">Total ECs</th>
+                <th className="text-right pb-1">Status</th>
+              </tr></thead>
+              <tbody>
+                {Object.entries(r.tCloseness).map(([sa, res]) => {
+                  const tStatus = res.violatingECs === 0 ? "PASS" : res.violatingECs / res.totalECs < 0.5 ? "WARN" : "FAIL";
+                  return (
+                    <tr key={sa} className="border-b border-muted">
+                      <td className="py-2 font-medium">{sa}</td>
+                      <td className="py-2 text-right font-mono">{res.maxDistance.toFixed(4)}</td>
+                      <td className="py-2 text-right font-bold text-red-600">{res.violatingECs}</td>
+                      <td className="py-2 text-right">{res.totalECs}</td>
+                      <td className="py-2 text-right">
+                        {tStatus === "FAIL" ? <span className="text-red-600 font-semibold">🔴 FAIL</span>
+                          : tStatus === "WARN" ? <span className="text-amber-600 font-semibold">🟡 WARN</span>
+                          : <span className="text-green-600 font-semibold">🟢 PASS</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §4.13 Recommendations */}
       <RecommendationsCard recs={r.recommendations} />
     </div>
   );
@@ -1716,6 +2247,27 @@ function InferenceReport({ r }: { r: InferenceResult }) {
                   <div className="text-xl font-bold text-red-600">{sa.formA.highRiskRecordPct.toFixed(1)}%</div>
                 </div>
               </div>
+
+              {/* ── Structural artifact warning when ALL ECs are singletons ── */}
+              {sa.formA.ecBreakdown.length > 0 && sa.formA.ecBreakdown.every((ec) => ec.ecSize === 1) && (
+                <div className="mb-3 p-3 bg-amber-50 dark:bg-amber-900/25 border border-amber-300 rounded text-xs text-amber-900 dark:text-amber-200">
+                  <div className="font-bold mb-1">⚠️ STRUCTURAL ARTIFACT — Form A confidence of 100% is a mathematical artifact, not evidence of group-level inference risk</div>
+                  All {sa.formA.ecBreakdown.length} equivalence classes are singletons (each record is unique under the selected QIs).
+                  When an EC contains exactly 1 record, its dominant SA value confidence is always 1/1 = 100% <em>by mathematical definition</em> —
+                  not because the group is homogeneous, but because there is only one group member.
+                  <strong> A genuinely dangerous Form A result would be 100% confidence on ECs of size ≥ 2</strong>, where multiple
+                  different people share the same QI profile yet all have the same sensitive value.
+                  <div className="mt-1 font-semibold">Fix: Reduce the number or specificity of the selected quasi-identifiers so that multi-record equivalence classes form before interpreting Form A confidence scores.</div>
+                </div>
+              )}
+
+              {/* ── Per-SA small sample warning ── */}
+              {r.smallSampleWarning && (
+                <div className="mb-3 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 rounded text-xs text-amber-800 dark:text-amber-200">
+                  ⚠️ Small sample ({r.sampleN} records): Form A confidence scores for "<strong>{sa.sa}</strong>" near 1.0 may reflect small-sample noise rather than a genuine population-level pattern.
+                </div>
+              )}
+
               <div className="text-xs font-semibold text-muted-foreground mb-1">Worst Equivalence Classes (top 10 by confidence):</div>
               <ScrollArea className="h-[160px]">
                 <table className="w-full text-xs">
@@ -2726,7 +3278,7 @@ export default function RiskPage() {
     if (selectedAttacks.includes("prosecutor"))          steps.push({ id: "prosecutor",          label: "Prosecutor Attack (Within-Dataset Re-ID)...",         fn: () => { newResults.prosecutor          = runProsecutorAttack(rawData, quasiIdentifiers, kThreshold[0], sensitiveAttributes, lThreshold[0], tVal); } });
     if (selectedAttacks.includes("journalist"))          steps.push({ id: "journalist",          label: "Journalist Attack (Population-Based Re-ID)...",        fn: () => { newResults.journalist          = runJournalistAttack(rawData, quasiIdentifiers, kThreshold[0], sensitiveAttributes, lThreshold[0], tVal, samplePct[0]); } });
     if (selectedAttacks.includes("marketer"))            steps.push({ id: "marketer",            label: "Marketer Attack (Bulk Commercial Re-ID)...",           fn: () => { newResults.marketer            = runMarketerAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0], tVal, kThreshold[0]); } });
-    if (selectedAttacks.includes("singlingOut"))         steps.push({ id: "singlingOut",         label: "Singling Out Attack (GDPR Singling-Out Standard)...",   fn: () => { newResults.singlingOut         = runSingleOutAttack(rawData, allCols, kThreshold[0]); } });
+    if (selectedAttacks.includes("singlingOut"))         steps.push({ id: "singlingOut",         label: "Singling Out Attack (GDPR Singling-Out Standard)...",   fn: () => { newResults.singlingOut         = runSingleOutAttack(rawData, quasiIdentifiers, sensitiveAttributes, kThreshold[0], lThreshold[0], tVal); } });
     if (selectedAttacks.includes("inference"))           steps.push({ id: "inference",           label: "Inference Attack (Form A+B: EC Homogeneity & Predictive)...", fn: () => { newResults.inference           = runInferenceAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0]); } });
     if (selectedAttacks.includes("membership"))          steps.push({ id: "membership",          label: "Membership Attack (AUC Presence Detection)...",         fn: () => { newResults.membership          = runMembershipAttack(rawData, quasiIdentifiers); } });
     if (selectedAttacks.includes("recordLinkage"))       steps.push({ id: "recordLinkage",       label: "Record Linkage Attack (External Dataset Re-ID)...",          fn: () => { newResults.recordLinkage       = runRecordLinkageAttack(rawData, quasiIdentifiers); } });
