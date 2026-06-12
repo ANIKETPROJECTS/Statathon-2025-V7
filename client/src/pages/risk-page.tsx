@@ -2568,64 +2568,460 @@ function InferenceReport({ r }: { r: InferenceResult }) {
 }
 
 function MembershipReport({ r }: { r: MembershipResult }) {
+  const [traceFilter, setTraceFilter] = useState<"all" | "high" | "low">("all");
+  const [tracePage, setTracePage] = useState(0);
+  const PAGE_SIZE = 15;
+
+  const fAColor = (s: number) => s >= 0.7 ? "#DC2626" : s >= 0.5 ? "#EA580C" : s >= 0.3 ? "#D97706" : "#16A34A";
+  const fAEmoji = (s: number) => s >= 0.7 ? "🔴" : s >= 0.5 ? "🟠" : s >= 0.3 ? "🟡" : "🟢";
+  const statusBadge = (st: string) =>
+    st === "HIGH" ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200"
+    : st === "MEDIUM" ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+    : "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200";
+
+  const riskColor = r.pctHighRisk > 20 ? "text-red-600" : r.pctHighRisk > 5 ? "text-amber-600" : "text-green-600";
+  const riskLabel = r.pctHighRisk > 20 ? "HIGH RISK" : r.pctHighRisk > 5 ? "MEDIUM RISK" : "LOW RISK";
+  const bannerClass = r.pctHighRisk > 20
+    ? "border-red-400 bg-red-50 dark:bg-red-950/20"
+    : r.pctHighRisk > 5 ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20"
+    : "border-green-400 bg-green-50 dark:bg-green-950/20";
+  const riskBadgeClass = r.pctHighRisk > 20 ? "bg-red-600 text-white" : r.pctHighRisk > 5 ? "bg-amber-600 text-white" : "bg-green-600 text-white";
+
+  const mostDistinctive = r.top10Distinctive[0];
+  const conflictRows = r.crossCheck.filter((c) => c.conflict);
+  const profileCols = r.profileAttributesUsed.slice(0, 3);
+
+  const filteredRecords = r.records.filter((rec) =>
+    traceFilter === "high" ? rec.highRisk : traceFilter === "low" ? !rec.highRisk : true
+  );
+  const totalPages = Math.ceil(filteredRecords.length / PAGE_SIZE);
+  const pageRecords = filteredRecords.slice(tracePage * PAGE_SIZE, (tracePage + 1) * PAGE_SIZE);
+
+  const BUCKET_FILLS = ["#16A34A", "#65A30D", "#D97706", "#EA580C", "#DC2626"];
+
+  const formAChartData = r.formADistribution.map((b, i) => ({
+    range: ["0–0.19","0.2–0.39","0.4–0.59","0.6–0.79","0.8–1.0"][i],
+    count: b.count, fill: BUCKET_FILLS[i],
+  }));
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCard("AUC Score", r.aucScore.toFixed(3), "0.5 = random, 1.0 = full leakage", <UserCheck className="h-4 w-4" />, r.aucScore > 0.75 ? "text-red-600" : "text-green-600")}
-        {kpiCard("Membership Risk", `${r.membershipRiskPct}%`, "2×(AUC−0.5) normalized", <AlertTriangle className="h-4 w-4" />, r.membershipRiskPct > 30 ? "text-red-600" : "text-green-600")}
-        {kpiCard("Isolation Rate", `${(r.isolationRate * 100).toFixed(1)}%`, "Records easily detectable as members", <Fingerprint className="h-4 w-4" />, r.isolationRate > 0.2 ? "text-orange-600" : "text-green-600")}
-        {kpiCard("Memorization", r.memorization.toFixed(3), "Avg NN similarity within dataset", <Brain className="h-4 w-4" />)}
+
+      {/* ── §8.1 Attack Summary Banner ─────────────────────────────────────────────── */}
+      <div className={`p-4 rounded-lg border-2 ${bannerClass}`}>
+        <div className="flex items-start justify-between mb-3 gap-3">
+          <div className="min-w-0">
+            <div className="font-bold text-lg">🟤 MEMBERSHIP INFERENCE ATTACK RESULTS</div>
+            <div className="text-sm text-muted-foreground mt-1">
+              Rows analysed: <strong>{r.N}</strong> &nbsp;|&nbsp;
+              Profile attributes used (QI ∪ SA, direct identifiers excluded): <strong>{r.profileAttributesUsed.length}</strong>
+            </div>
+            {r.profileAttributesUsed.length > 0 && (
+              <div className="text-xs text-muted-foreground mt-0.5 font-mono break-all">
+                [{r.profileAttributesUsed.join(", ")}]
+              </div>
+            )}
+          </div>
+          <Badge className={`shrink-0 text-sm px-3 py-1 ${riskBadgeClass}`}>{riskLabel}</Badge>
+        </div>
+        <p className="text-sm leading-relaxed">
+          This attack asks a different question than the others: NOT "which row is this person" or "what is their attribute",
+          but <strong>"is this person's data in this dataset AT ALL"</strong>.{" "}
+          <strong className={riskColor}>{r.pctHighRisk}% of records ({r.highRiskCount} out of {r.N})</strong> have
+          profiles distinctive enough — either standing out within this dataset (Form A) or rare in the wider population
+          (Form B) — that an attacker with a matching external profile could confidently confirm this person participated,
+          even without knowing which row is theirs.
+        </p>
+        <div className="mt-3 p-2 bg-amber-100 dark:bg-amber-900/30 border border-amber-300 rounded text-xs text-amber-900 dark:text-amber-200">
+          ⚠️ <strong>Why this matters even if Prosecutor/Journalist risk is LOW:</strong> Membership Inference does NOT
+          require finding "your" row. Even a perfectly k-anonymous dataset (every EC size ≥ k) can leak
+          the fact that "someone with profile P participated" if profile P is unusual enough overall.
+        </div>
+        {r.configConflicts.length > 0 && (
+          <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-900/20 border border-orange-300 rounded text-xs text-orange-800 dark:text-orange-200">
+            ⚠️ <strong>{r.configConflicts.join(", ")}</strong> {r.configConflicts.length === 1 ? "is" : "are"} flagged as
+            a direct identifier AND selected as QI/SA — excluded from Form A distance calculation to avoid artificially
+            inflating outlier scores. Consider deselecting or binning into ranges first.
+          </div>
+        )}
+        {r.smallSampleWarning && (
+          <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 rounded text-xs text-amber-800 dark:text-amber-200">
+            ⚠️ With only {r.N} records, results are highly sensitive to individual records. Treat as illustrative only.
+          </div>
+        )}
       </div>
+
+      {/* ── §8.2 KPI Cards ─────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <Card><CardContent className="pt-4">
+          <div className="text-xs text-muted-foreground">Avg Form A Outlier Score</div>
+          <div className="text-2xl font-bold mt-1" style={{ color: fAColor(r.avgFormAScore) }}>{r.avgFormAScore.toFixed(3)}</div>
+          <div className="text-xs text-muted-foreground">within-dataset distinctiveness</div>
+        </CardContent></Card>
+        <Card><CardContent className="pt-4">
+          <div className="text-xs text-muted-foreground">Avg Form B Population Rarity</div>
+          {r.formBStatus === "ok" && r.avgFormBScore !== null
+            ? <div className="text-2xl font-bold mt-1" style={{ color: fAColor(r.avgFormBScore) }}>{r.avgFormBScore.toFixed(3)}</div>
+            : <div className="text-2xl font-bold mt-1 text-muted-foreground">N/A</div>}
+          <div className="text-xs text-muted-foreground">via Multiplier_comb rarity</div>
+        </CardContent></Card>
+        <Card><CardContent className="pt-4">
+          <div className="text-xs text-muted-foreground">High-Risk Records</div>
+          <div className={`text-2xl font-bold mt-1 ${r.highRiskCount > 0 ? "text-red-600" : "text-green-600"}`}>
+            {r.highRiskCount} <span className="text-sm">({r.pctHighRisk}%)</span>
+          </div>
+          <div className="text-xs text-muted-foreground">Form A ≥ 0.7 OR Form B ≥ 0.7</div>
+        </CardContent></Card>
+        <Card><CardContent className="pt-4">
+          <div className="text-xs text-muted-foreground">Most Distinctive Record</div>
+          <div className="text-2xl font-bold mt-1 text-red-600">Row #{r.mostDistinctiveRowIdx + 1}</div>
+          <div className="text-xs text-muted-foreground">score {r.mostDistinctiveFormAScore.toFixed(3)}</div>
+        </CardContent></Card>
+        <Card><CardContent className="pt-4">
+          <div className="text-xs text-muted-foreground">Profile Attributes Used</div>
+          <div className="text-2xl font-bold mt-1 text-blue-600">{r.profileAttributesUsed.length}</div>
+          <div className="text-xs text-muted-foreground">columns in Gower distance</div>
+        </CardContent></Card>
+      </div>
+
+      {/* ── §8.4 Attack Simulation Narrative ───────────────────────────────────────── */}
+      {mostDistinctive && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm">🔍 ATTACK SIMULATION — Membership Inference Walkthrough</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              <strong>Scenario:</strong> An attacker has obtained a profile of a specific person — from a leaked HR
+              database, social media, or another linked dataset — containing:{" "}
+              <span className="font-mono text-foreground text-xs">
+                {Object.entries(mostDistinctive.profileValues).map(([k, v]) => `${k}=${v}`).join(", ")}
+              </span>
+            </p>
+            <p className="text-muted-foreground text-xs">
+              The attacker does <strong>NOT</strong> know if this person took part in this particular survey. They want to find out.
+            </p>
+            <div className="space-y-2 pl-4 border-l-2 border-muted text-xs">
+              <div>
+                <strong>Step 1 — Search for a close match</strong>
+                <p className="text-muted-foreground mt-0.5">
+                  The attacker scans this dataset's {r.profileAttributesUsed.length} profile attributes for records similar to the target profile using Gower distance.
+                </p>
+              </div>
+              <div>
+                <strong>Step 2 — Evaluate the closest match</strong>
+                <p className="text-muted-foreground mt-0.5">
+                  Row #{mostDistinctive.nearestNeighborIdx + 1} is the closest match, with a Gower distance of{" "}
+                  <strong style={{ color: fAColor(mostDistinctive.formAScore) }}>{mostDistinctive.formAScore.toFixed(3)}</strong> —
+                  meaning the two profiles are {(mostDistinctive.formAScore * 100).toFixed(0)}% different across all profile attributes.
+                </p>
+                {mostDistinctive.formAScore >= 0.7 ? (
+                  <p className="text-amber-700 dark:text-amber-300 mt-1">
+                    ⚠️ This is a poor match — no record closely resembles the target. However, if the attacker knows this dataset
+                    is meant to be representative of people like their target, the presence of such a distinctive profile confirms
+                    "someone like this is in the data."
+                  </p>
+                ) : (
+                  <p className="text-green-700 dark:text-green-300 mt-1">
+                    ✅ Multiple records closely resemble this profile. The attacker CANNOT confidently distinguish "my target's data"
+                    from "a similar-looking other person's data" — this provides plausible deniability.
+                  </p>
+                )}
+              </div>
+              {r.formBStatus === "ok" && mostDistinctive.formBScore !== null && (
+                <div>
+                  <strong>Step 3 — Population context (Form B)</strong>
+                  <p className="text-muted-foreground mt-0.5">
+                    This profile's estimated population rarity score is{" "}
+                    <strong style={{ color: fAColor(mostDistinctive.formBScore) }}>{mostDistinctive.formBScore.toFixed(3)}</strong> (via Multiplier_comb).{" "}
+                    {mostDistinctive.formBScore >= 0.7
+                      ? "This profile is RARE in the general population — finding any closely-matching record strongly suggests their target participated."
+                      : "This profile is relatively common in the general population, reducing Form B membership confidence."}
+                  </p>
+                </div>
+              )}
+              <div>
+                <strong>Step {r.formBStatus === "ok" ? "4" : "3"} — Scale</strong>
+                <p className="text-muted-foreground mt-0.5">
+                  <strong className={riskColor}>{r.highRiskCount} out of {r.N} records ({r.pctHighRisk}%)</strong> have
+                  high membership-inference risk (Form A ≥ 0.7 OR Form B ≥ 0.7).
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── §8.5 Form A + §8.6 Form B Distribution ─────────────────────────────────── */}
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
-          <CardHeader><CardTitle className="text-sm">ROC Curve (AUC = {r.aucScore.toFixed(3)})</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-sm">Form A Outlier Score Distribution</CardTitle>
+            <CardDescription className="text-xs">⚠️ HIGH score = HIGH risk (inverted from Prosecutor EC-size charts)</CardDescription>
+          </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={r.rocCurve}>
+            <ResponsiveContainer width="100%" height={190}>
+              <BarChart data={formAChartData} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="fpr" tick={{ fontSize: 11 }} label={{ value: "FPR", position: "insideBottom", offset: -2, fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 11 }} label={{ value: "TPR", angle: -90, position: "insideLeft", fontSize: 10 }} />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis dataKey="range" type="category" tick={{ fontSize: 10 }} width={58} />
                 <Tooltip {...CHART_TOOLTIP} />
-                <Line type="monotone" dataKey="tpr" stroke="#DC2626" strokeWidth={2} dot={false} name="TPR" />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Similarity Distribution (Members vs Non-members)</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={r.similarityDistribution}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="members" fill="#DC2626" name="Members" />
-                <Bar dataKey="nonMembers" fill="#16A34A" name="Non-members" />
-                <Legend />
+                <Bar dataKey="count" name="Records" radius={[0, 4, 4, 0]}>
+                  {formAChartData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        <Card className="md:col-span-2">
-          <CardHeader><CardTitle className="text-sm">Threshold Sensitivity Table</CardTitle></CardHeader>
-          <CardContent>
-            <table className="w-full text-xs">
-              <thead><tr className="border-b"><th className="text-left pb-2">Threshold</th><th className="text-right pb-2">TPR (Recall)</th><th className="text-right pb-2">FPR</th><th className="text-right pb-2">Precision</th></tr></thead>
+            <table className="w-full text-xs mt-2">
+              <thead><tr className="border-b"><th className="text-left pb-1">Range</th><th className="text-right pb-1">#</th><th className="text-right pb-1">%</th><th className="text-left pb-1 pl-2">Meaning</th></tr></thead>
               <tbody>
-                {r.thresholdTable.map((row, i) => (
+                {r.formADistribution.map((b, i) => (
                   <tr key={i} className="border-b border-muted">
-                    <td className="py-1.5">{row.threshold}</td>
-                    <td className="py-1.5 text-right">{row.tpr}%</td>
-                    <td className="py-1.5 text-right">{row.fpr}%</td>
-                    <td className="py-1.5 text-right">{row.precision}%</td>
+                    <td className="py-0.5 font-mono text-[10px]">{b.range}</td>
+                    <td className="py-0.5 text-right">{b.count}</td>
+                    <td className="py-0.5 text-right">{b.pct}%</td>
+                    <td className="py-0.5 pl-2 text-muted-foreground truncate max-w-[160px]">{b.meaning}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Form B Population Rarity Distribution</CardTitle>
+            <CardDescription className="text-xs">
+              {r.formBStatus === "ok"
+                ? "LOW Multiplier_comb = rare in population = HIGH Form B risk (inverse of Journalist)"
+                : "Requires Multiplier_comb column to be present in dataset"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {r.formBStatus === "ok" ? (
+              <>
+                <ResponsiveContainer width="100%" height={190}>
+                  <BarChart data={r.formBDistribution.map((b, i) => ({ ...b, fill: BUCKET_FILLS[i] }))} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis type="number" tick={{ fontSize: 11 }} />
+                    <YAxis dataKey="range" type="category" tick={{ fontSize: 10 }} width={58} />
+                    <Tooltip {...CHART_TOOLTIP} />
+                    <Bar dataKey="count" name="Records" radius={[0, 4, 4, 0]}>
+                      {r.formBDistribution.map((_, i) => <Cell key={i} fill={BUCKET_FILLS[i]} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 rounded text-xs text-amber-700 dark:text-amber-300">
+                  ⚠️ Form B treats Multiplier_comb as a PROXY for population rarity. With only {r.N} records,
+                  scores are relative WITHIN THIS SAMPLE only — not absolute population-level probabilities.
+                </div>
+              </>
+            ) : (
+              <div className="p-6 text-sm text-muted-foreground border border-dashed rounded text-center space-y-2">
+                <div className="text-3xl">📊</div>
+                <div>⚠️ Form B requires the <strong>Multiplier_comb</strong> column.</div>
+                <div className="text-xs">
+                  This column was not found in your dataset. Form A results above are the primary risk indicator.
+                  If you have a population expansion weight column, rename it to <code>Multiplier_comb</code> and re-run.
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      {/* ── §8.7 Top 10 Most Distinctive Records ───────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Top 10 Most Distinctive Records (by Form A Outlier Score)</CardTitle>
+          <CardDescription className="text-xs">
+            These records are statistically distinctive within the dataset. While they may not be directly re-identifiable
+            (check Prosecutor results separately), their unusual combination of attributes makes it easier for an attacker
+            to confirm whether "someone like this" is included, even without knowing which row is theirs.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[240px]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left pb-2 pr-2">Rank</th>
+                  <th className="text-left pb-2 pr-2">Row #</th>
+                  {profileCols.map((c) => (
+                    <th key={c} className="text-left pb-2 pr-2 truncate max-w-[80px]">{c}</th>
+                  ))}
+                  <th className="text-right pb-2 pr-2">Form A</th>
+                  {r.formBStatus === "ok" && <th className="text-right pb-2 pr-2">Form B</th>}
+                  <th className="text-right pb-2 pr-2">Nearest Neighbour</th>
+                  <th className="text-right pb-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.top10Distinctive.map((rec, i) => (
+                  <tr key={i} className={`border-b border-muted ${rec.highRisk ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}>
+                    <td className="py-1.5 pr-2 font-bold text-muted-foreground">#{i + 1}</td>
+                    <td className="py-1.5 pr-2 font-mono">Row {rec.rowIdx + 1}</td>
+                    {profileCols.map((c) => (
+                      <td key={c} className="py-1.5 pr-2 truncate max-w-[80px] text-muted-foreground">{rec.profileValues[c] ?? "—"}</td>
+                    ))}
+                    <td className="py-1.5 pr-2 text-right font-bold" style={{ color: fAColor(rec.formAScore) }}>{rec.formAScore.toFixed(3)}</td>
+                    {r.formBStatus === "ok" && (
+                      <td className="py-1.5 pr-2 text-right" style={{ color: rec.formBScore !== null ? fAColor(rec.formBScore) : undefined }}>
+                        {rec.formBScore !== null ? rec.formBScore.toFixed(3) : "—"}
+                      </td>
+                    )}
+                    <td className="py-1.5 pr-2 text-right text-muted-foreground">
+                      Row {rec.nearestNeighborIdx + 1} <span className="text-[10px]">(d={rec.nearestNeighborDist.toFixed(3)})</span>
+                    </td>
+                    <td className="py-1.5 text-right">
+                      <Badge className={`text-[10px] ${statusBadge(rec.status)}`}>{fAEmoji(rec.formAScore)} {rec.status}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollArea>
+        </CardContent>
+      </Card>
+
+      {/* ── §8.8 Cross-Check: Membership vs Prosecutor (k-anonymity) ───────────────── */}
+      <Card className={conflictRows.length > 0 ? "border-red-400 dark:border-red-600" : ""}>
+        <CardHeader>
+          <CardTitle className="text-sm">
+            {conflictRows.length > 0 ? "🚨" : "🔵"} Cross-Check: Membership Risk vs Re-Identification Risk
+          </CardTitle>
+          <CardDescription className="text-xs">
+            The single most important insight: a record can simultaneously be PROTECTED from row-level re-identification
+            (k-anonymity satisfied) and HIGH RISK for membership inference. K-anonymity provides <strong>zero</strong> guarantee against this attack.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {r.crossCheck.length === 0 ? (
+            <div className="text-sm text-muted-foreground p-4 text-center border border-dashed rounded">
+              ℹ️ Run the <strong>Prosecutor Attack</strong> assessment alongside Membership Inference to see
+              how these results compare against your dataset's k-anonymity protections.
+            </div>
+          ) : (
+            <>
+              {conflictRows.length > 0 && (
+                <div className="mb-3 p-3 bg-red-50 dark:bg-red-950/20 border border-red-300 rounded text-xs text-red-900 dark:text-red-200">
+                  <strong>⚠️ {conflictRows.length} CONFLICT{conflictRows.length > 1 ? "S" : ""} DETECTED:</strong>{" "}
+                  {conflictRows.length === 1 ? "1 record is" : `${conflictRows.length} records are`} PROTECTED by k-anonymity
+                  (EC size ≥ 3, QIs shared with ≥ 3 others) but HIGH RISK for membership inference (Form A ≥ 0.7).
+                  This proves k-anonymity does NOT protect against membership inference operating on the full QI+SA profile.
+                </div>
+              )}
+              <ScrollArea className="h-[200px]">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left pb-2">Row #</th>
+                      <th className="text-right pb-2">EC Size</th>
+                      <th className="text-center pb-2">Prosecutor Status</th>
+                      <th className="text-right pb-2">Form A Score</th>
+                      <th className="text-center pb-2">Membership Status</th>
+                      <th className="text-center pb-2">Conflict?</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.crossCheck.map((c, i) => (
+                      <tr key={i} className={`border-b border-muted ${c.conflict ? "bg-red-50/60 dark:bg-red-950/15" : ""}`}>
+                        <td className="py-1.5 font-mono">Row {c.rowIdx + 1}</td>
+                        <td className="py-1.5 text-right">{c.ecSize}</td>
+                        <td className="py-1.5 text-center">
+                          <Badge className={`text-[10px] ${c.prosecutorStatus === "PROTECTED" ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200" : "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200"}`}>
+                            {c.prosecutorStatus === "PROTECTED" ? "🟢 PROTECTED" : "🔴 VULNERABLE"}
+                          </Badge>
+                        </td>
+                        <td className="py-1.5 text-right font-bold" style={{ color: fAColor(c.formAScore) }}>{c.formAScore.toFixed(3)}</td>
+                        <td className="py-1.5 text-center">
+                          <Badge className={`text-[10px] ${statusBadge(c.membershipStatus)}`}>
+                            {fAEmoji(c.formAScore)} {c.membershipStatus}
+                          </Badge>
+                        </td>
+                        <td className="py-1.5 text-center font-bold">
+                          {c.conflict ? <span className="text-red-600">⚠️ YES</span> : <span className="text-muted-foreground text-[10px]">—</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ScrollArea>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── §8.3 Record-Level Membership Trace ─────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Record-Level Membership Trace</CardTitle>
+          <CardDescription className="text-xs">
+            Per-record Form A outlier score and Form B population rarity, with nearest-neighbour identity
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            {(["all", "high", "low"] as const).map((f) => (
+              <Button key={f} size="sm" variant={traceFilter === f ? "default" : "outline"} className="h-7 text-xs"
+                onClick={() => { setTraceFilter(f); setTracePage(0); }}>
+                {f === "all" ? "Show All" : f === "high" ? "🔴 High Risk Only" : "🟢 Low Risk Only"}
+                <Badge variant="outline" className="ml-1 text-[10px] h-4 px-1">
+                  {f === "all" ? r.records.length : f === "high" ? r.records.filter((x) => x.highRisk).length : r.records.filter((x) => !x.highRisk).length}
+                </Badge>
+              </Button>
+            ))}
+          </div>
+          <ScrollArea className="h-[280px]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left pb-2 pr-2">Row #</th>
+                  {profileCols.map((c) => (
+                    <th key={c} className="text-left pb-2 pr-2 truncate max-w-[80px]">{c}</th>
+                  ))}
+                  <th className="text-right pb-2 pr-2">Form A</th>
+                  {r.formBStatus === "ok" && <th className="text-right pb-2 pr-2">Form B</th>}
+                  <th className="text-right pb-2 pr-2">Nearest Neighbour</th>
+                  <th className="text-center pb-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRecords.map((rec, i) => (
+                  <tr key={i} className={`border-b border-muted ${rec.highRisk ? "bg-red-50/40 dark:bg-red-950/10" : ""}`}>
+                    <td className="py-1 pr-2 font-mono">{rec.rowIdx + 1}</td>
+                    {profileCols.map((c) => (
+                      <td key={c} className="py-1 pr-2 truncate max-w-[80px] text-muted-foreground">{rec.profileValues[c] ?? "—"}</td>
+                    ))}
+                    <td className="py-1 pr-2 text-right font-bold" style={{ color: fAColor(rec.formAScore) }}>{rec.formAScore.toFixed(3)}</td>
+                    {r.formBStatus === "ok" && (
+                      <td className="py-1 pr-2 text-right" style={{ color: rec.formBScore !== null ? fAColor(rec.formBScore) : undefined }}>
+                        {rec.formBScore !== null ? rec.formBScore.toFixed(3) : "—"}
+                      </td>
+                    )}
+                    <td className="py-1 pr-2 text-right text-muted-foreground">Row {rec.nearestNeighborIdx + 1}</td>
+                    <td className="py-1 text-center">
+                      <Badge className={`text-[10px] ${statusBadge(rec.status)}`}>{fAEmoji(rec.formAScore)} {rec.status}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollArea>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-3">
+              <Button variant="outline" size="sm" className="h-7 text-xs" disabled={tracePage === 0}
+                onClick={() => setTracePage((p) => p - 1)}>
+                <ChevronLeft className="h-3 w-3 mr-1" /> Previous
+              </Button>
+              <span className="text-xs text-muted-foreground">Page {tracePage + 1} of {totalPages}</span>
+              <Button variant="outline" size="sm" className="h-7 text-xs" disabled={tracePage >= totalPages - 1}
+                onClick={() => setTracePage((p) => p + 1)}>
+                Next <ChevronRight className="h-3 w-3 ml-1" />
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── §8.9 Recommendations ───────────────────────────────────────────────────── */}
       <RecommendationsCard recs={r.recommendations} />
     </div>
   );
@@ -3280,7 +3676,7 @@ export default function RiskPage() {
     if (selectedAttacks.includes("marketer"))            steps.push({ id: "marketer",            label: "Marketer Attack (Bulk Commercial Re-ID)...",           fn: () => { newResults.marketer            = runMarketerAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0], tVal, kThreshold[0]); } });
     if (selectedAttacks.includes("singlingOut"))         steps.push({ id: "singlingOut",         label: "Singling Out Attack (GDPR Singling-Out Standard)...",   fn: () => { newResults.singlingOut         = runSingleOutAttack(rawData, quasiIdentifiers, sensitiveAttributes, kThreshold[0], lThreshold[0], tVal); } });
     if (selectedAttacks.includes("inference"))           steps.push({ id: "inference",           label: "Inference Attack (Form A+B: EC Homogeneity & Predictive)...", fn: () => { newResults.inference           = runInferenceAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0]); } });
-    if (selectedAttacks.includes("membership"))          steps.push({ id: "membership",          label: "Membership Attack (AUC Presence Detection)...",         fn: () => { newResults.membership          = runMembershipAttack(rawData, quasiIdentifiers); } });
+    if (selectedAttacks.includes("membership"))          steps.push({ id: "membership",          label: "Membership Inference Attack (Gower NN + Population Rarity)...", fn: () => { newResults.membership          = runMembershipAttack(rawData, quasiIdentifiers, sensitiveAttributes, autoAssist?.columnGroups.directIdentifiers ?? []); } });
     if (selectedAttacks.includes("recordLinkage"))       steps.push({ id: "recordLinkage",       label: "Record Linkage Attack (External Dataset Re-ID)...",          fn: () => { newResults.recordLinkage       = runRecordLinkageAttack(rawData, quasiIdentifiers); } });
     if (selectedAttacks.includes("attributeDisclosure")) steps.push({ id: "attributeDisclosure", label: "Attribute Disclosure Attack (Sensitive Inference)...",        fn: () => { newResults.attributeDisclosure = runAttributeDisclosureAttack(rawData, quasiIdentifiers, sensitiveAttributes); } });
     if (selectedAttacks.includes("differencing"))        steps.push({ id: "differencing",        label: "Differencing Attack (Aggregate Query Leakage)...",            fn: () => { newResults.differencing        = runDifferencingAttack(rawData, quasiIdentifiers); } });
