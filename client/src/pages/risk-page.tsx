@@ -33,7 +33,7 @@ import { runInferenceAttack, type InferenceResult } from "@/lib/attacks/inferenc
 import { runMembershipAttack, type MembershipResult } from "@/lib/attacks/membershipAttack";
 import { runRecordLinkageAttack, type RecordLinkageResult, type LinkageOutcome } from "@/lib/attacks/recordLinkageAttack";
 import { runAttributeDisclosureAttack, type AttributeDisclosureResult, type DisclosureLabel } from "@/lib/attacks/attributeDisclosureAttack";
-import { runDifferencingAttack, type DifferencingResult } from "@/lib/attacks/differencingAttack";
+import { runDifferencingAttack, type DifferencingResult, type DiffLabel } from "@/lib/attacks/differencingAttack";
 import { runModelInversionAttack, type ModelInversionResult } from "@/lib/attacks/modelInversionAttack";
 import { computeCompositeScore, type CompositeResult } from "@/lib/attacks/compositeScore";
 import { sampleData, type DataRow, RISK_COLORS, type RiskLevel } from "@/lib/attacks/utils";
@@ -3995,93 +3995,449 @@ function AttributeDisclosureReport({ r }: { r: AttributeDisclosureResult }) {
 }
 
 function DifferencingReport({ r }: { r: DifferencingResult }) {
+  const [diffFilter, setDiffFilter] = useState<DiffLabel | "All">("All");
+  const [diffSearch, setDiffSearch] = useState("");
+  const [diffPage, setDiffPage] = useState(0);
+  const PAGE_SIZE = 50;
+
+  const diffLabelColor = (label: DiffLabel) =>
+    label === "Exact Reconstruction" ? "#DC2626" : label === "Near-Exact" ? "#EA580C" : label === "Partial" ? "#D97706" : "#16A34A";
+  const diffLabelBg = (label: DiffLabel) =>
+    label === "Exact Reconstruction" ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+    : label === "Near-Exact" ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
+    : label === "Partial" ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+    : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+
+  const filteredRecords = r.recordTable.filter((row) => {
+    const matchFilter = diffFilter === "All" || row.diffLabel === diffFilter;
+    const matchSearch = diffSearch === "" || r.quasiIdentifiers.some((qi) => String(row.qiValues[qi] ?? "").toLowerCase().includes(diffSearch.toLowerCase()));
+    return matchFilter && matchSearch;
+  });
+  const pagedRecords = filteredRecords.slice(diffPage * PAGE_SIZE, (diffPage + 1) * PAGE_SIZE);
+  const totalPages = Math.ceil(filteredRecords.length / PAGE_SIZE);
+
+  const donutData = [
+    { name: "Exact Reconstruction", value: r.exactCount, fill: "#DC2626" },
+    { name: "Near-Exact", value: r.nearExactCount, fill: "#EA580C" },
+    { name: "Partial", value: r.partialCount, fill: "#D97706" },
+    { name: "Protected", value: r.protectedCount, fill: "#16A34A" },
+  ].filter((d) => d.value > 0);
+
+  const badgeColor = r.riskLevel === "HIGH" ? "bg-red-600" : r.riskLevel === "MEDIUM" ? "bg-yellow-500" : "bg-green-600";
+  const badgeIcon  = r.riskLevel === "HIGH" ? "🔴" : r.riskLevel === "MEDIUM" ? "🟡" : "🟢";
+
+  const exportCSV = () => {
+    const qiCols = r.quasiIdentifiers.join(",");
+    const header = `Row #,${qiCols},EC Size,Diff Risk,Vulnerability Label,Query Pair Possible?,At Risk\n`;
+    const rows = r.recordTable.map((row) => {
+      const qiVals = r.quasiIdentifiers.map((qi) => `"${row.qiValues[qi] ?? ""}"`).join(",");
+      return `${row.rowIdx},${qiVals},${row.ecSize},${row.diffRisk},"${row.diffLabel}",${row.queryPairPossible ? "Yes" : "No"},${row.atRisk ? "At Risk" : "Protected"}`;
+    });
+    const blob = new Blob([header + rows.join("\n")], { type: "text/csv" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "differencing_trace.csv"; a.click();
+  };
+
+  const mv = r.mostVulnerableRecord;
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCard("Differencing Risk", `${r.leakyPct}%`, "Leaky query pairs / total", <BarChart3 className="h-4 w-4" />, "text-red-600")}
-        {kpiCard("Leaky Queries", r.leakyPairs, `of ${r.totalPairs} total pairs`, <AlertTriangle className="h-4 w-4" />, r.leakyPairs > 0 ? "text-orange-600" : "text-green-600")}
-        {kpiCard("Max Leakage", `${r.maxLeakage}%`, `Column: ${r.maxLeakageColumn || "—"}`, <XCircle className="h-4 w-4" />, r.maxLeakage > 40 ? "text-red-600" : r.maxLeakage > 20 ? "text-orange-600" : "text-green-600")}
-        {kpiCard("Avg Leakage", `${r.avgLeakage}%`, "Mean |Q1-Q2|/Q1 across all pairs", <Eye className="h-4 w-4" />)}
+
+      {/* §5.1 Summary banner */}
+      <Card className={`border-l-4 ${r.riskLevel === "HIGH" ? "border-red-600" : r.riskLevel === "MEDIUM" ? "border-yellow-500" : "border-green-500"}`}>
+        <CardContent className="pt-4 space-y-2">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`text-xs font-bold text-white px-2 py-0.5 rounded ${badgeColor}`}>{badgeIcon} Differencing Attack Risk: {r.riskLevel}</span>
+          </div>
+          <p className="text-sm">
+            An attacker with access to aggregate query results (counts, sums, averages) over this dataset could reconstruct the sensitive
+            attribute values of <strong>{r.exactCount}</strong> individuals exactly, and approximate values for <strong>{r.nearExactCount}</strong> more.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            This attack does <strong>NOT</strong> require access to raw records. It works by issuing two overlapping queries and subtracting
+            the results to isolate a single person's data. <strong>{r.coverageRate.toFixed(1)}%</strong> of this dataset is reconstructable via differencing.
+          </p>
+          <p className="text-sm font-semibold text-red-700 dark:text-red-400">
+            k-anonymity and l-diversity do NOT prevent this attack. Differential Privacy noise addition is required.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Results based on {r.N} rows · QIs: {r.quasiIdentifiers.join(", ")} · SAs assessed: {r.sensitiveAttributes.join(", ") || "—"}
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* §5.2 KPI row */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        {kpiCard("DDR", `${(r.ddr * 100).toFixed(1)}%`, "Dataset Differencing Risk", <BarChart3 className="h-4 w-4" />, r.ddr > 0.2 ? "text-red-600" : r.ddr >= 0.05 ? "text-orange-600" : "text-green-600")}
+        {kpiCard("Exact Recon.", r.exactCount, "records (EC=1)", <XCircle className="h-4 w-4" />, r.exactCount > 0 ? "text-red-600" : "text-green-600")}
+        {kpiCard("Near-Exact", r.nearExactCount, "records (EC 2–3)", <AlertTriangle className="h-4 w-4" />, r.nearExactCount > 0 ? "text-orange-600" : "text-green-600")}
+        {kpiCard("Total Reconstructable", `${r.exactCount + r.nearExactCount}`, `${r.coverageRate.toFixed(1)}% of dataset`, <Eye className="h-4 w-4" />, (r.exactCount + r.nearExactCount) > 0 ? "text-red-600" : "text-green-600")}
+        {kpiCard("Min EC Size", r.minK, r.minK < 5 ? "Below k-threshold" : "OK", <Shield className="h-4 w-4" />, r.minK < 5 ? "text-red-600" : "text-green-600")}
+        {kpiCard("Avg EC Size", r.avgEcSize.toFixed(1), "mean equivalence class", <Users className="h-4 w-4" />)}
       </div>
+
+      {/* §5.3 Donut + §5.6 EC size distribution side by side */}
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
-          <CardHeader><CardTitle className="text-sm">Leakage Distribution Histogram</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">§5.3 Vulnerability Distribution</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={r.leakageHistogram}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="count" name="Query Pairs" radius={[4, 4, 0, 0]}>
-                  {r.leakageHistogram.map((_, i) => (
-                    <Cell key={i} fill={["#16A34A", "#D97706", "#EA580C", "#DC2626", "#7C0000"][i] || "#DC2626"} />
+              <PieChart>
+                <Pie data={donutData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} dataKey="value" nameKey="name" paddingAngle={2}>
+                  {donutData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Pie>
+                <Tooltip {...CHART_TOOLTIP} formatter={(v: number, name: string) => [`${v} records`, name]} />
+                <Legend iconType="circle" iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-sm">§5.6 EC Size Distribution</CardTitle></CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs mb-3">
+                <thead><tr className="border-b text-muted-foreground">
+                  <th className="text-left pb-1">EC Size</th>
+                  <th className="text-right pb-1"># ECs</th>
+                  <th className="text-right pb-1"># Records</th>
+                  <th className="text-right pb-1">% of Data</th>
+                  <th className="text-right pb-1">Diff Risk</th>
+                </tr></thead>
+                <tbody>
+                  {r.ecSizeDistribution.map((b, i) => (
+                    <tr key={i} className="border-b border-muted">
+                      <td className="py-1 font-medium" style={{ color: b.fill }}>{b.label}</td>
+                      <td className="py-1 text-right">{b.ecCount}</td>
+                      <td className="py-1 text-right">{b.recordCount}</td>
+                      <td className="py-1 text-right">{b.pct}%</td>
+                      <td className="py-1 text-right text-xs" style={{ color: b.fill }}>
+                        {b.riskCategory === "Exact" ? "🔴 Certain" : b.riskCategory === "Near-Exact" ? "🟠 High accuracy" : b.riskCategory === "Partial" ? "🟡 Partial signal" : "🟢 Protected"}
+                      </td>
+                    </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+            <ResponsiveContainer width="100%" height={120}>
+              <BarChart data={r.ecSizeDistribution} layout="vertical" margin={{ left: 0, right: 10 }}>
+                <XAxis type="number" tick={{ fontSize: 10 }} />
+                <YAxis type="category" dataKey="label" tick={{ fontSize: 9 }} width={110} />
+                <Tooltip {...CHART_TOOLTIP} />
+                <Bar dataKey="recordCount" name="Records" radius={[0, 4, 4, 0]}>
+                  {r.ecSizeDistribution.map((b, i) => <Cell key={i} fill={b.fill} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Per-Column Leakage Risk</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={r.perColumnRisks.slice(0, 8)} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis type="number" tick={{ fontSize: 11 }} unit="%" />
-                <YAxis type="category" dataKey="column" tick={{ fontSize: 10 }} width={90} />
-                <Tooltip {...CHART_TOOLTIP} formatter={(v: number) => `${v}%`} />
-                <Bar dataKey="maxLeakage" fill="#DC2626" radius={[0, 4, 4, 0]} name="Max Leakage %" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        {r.perColumnRisks.length > 0 && (
-          <Card>
-            <CardHeader><CardTitle className="text-sm">Column-Level Differencing Risk Table</CardTitle></CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[220px]">
-                <table className="w-full text-xs">
-                  <thead><tr className="border-b"><th className="text-left pb-1">Column</th><th className="text-right pb-1">Global Avg</th><th className="text-right pb-1">Max Leakage</th><th className="text-right pb-1">Avg Leakage</th><th className="text-right pb-1">Leaky Records</th><th className="text-right pb-1">Risk</th></tr></thead>
-                  <tbody>
-                    {r.perColumnRisks.map((col, i) => (
-                      <tr key={i} className="border-b border-muted">
-                        <td className="py-1 font-medium">{col.column}</td>
-                        <td className="py-1 text-right text-muted-foreground">{col.globalValue}</td>
-                        <td className="py-1 text-right font-bold" style={{ color: col.maxLeakage > 40 ? "#DC2626" : "#16A34A" }}>{col.maxLeakage}%</td>
-                        <td className="py-1 text-right">{col.avgLeakage}%</td>
-                        <td className="py-1 text-right">{col.leakyRecords} ({col.leakyPct}%)</td>
-                        <td className="py-1 text-right">{riskBadge(col.riskLevel)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        )}
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Top Leaky Records (Highest |Q1−Q2| / Q1)</CardTitle></CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[220px]">
-              <table className="w-full text-xs">
-                <thead><tr className="border-b"><th className="text-left pb-1">Record #</th><th className="text-right pb-1">Column</th><th className="text-right pb-1">Global Avg</th><th className="text-right pb-1">Avg w/o Record</th><th className="text-right pb-1">Leakage</th></tr></thead>
-                <tbody>
-                  {r.topLeakyRecords.map((row, i) => (
-                    <tr key={i} className="border-b border-muted">
-                      <td className="py-1"># {row.index + 1}</td>
-                      <td className="py-1 text-right text-muted-foreground">{row.column}</td>
-                      <td className="py-1 text-right">{row.globalVal}</td>
-                      <td className="py-1 text-right">{row.withoutVal}</td>
-                      <td className="py-1 text-right font-bold text-red-600">{row.leakage}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </ScrollArea>
-          </CardContent>
-        </Card>
       </div>
+
+      {/* §5.4 Record trace table */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className="text-sm">§5.4 Record-Level Differencing Trace Table ({filteredRecords.length} records)</CardTitle>
+            <button onClick={exportCSV} className="text-xs px-2 py-1 rounded border border-muted hover:bg-muted transition-colors">⬇ Download Full Table (CSV)</button>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {(["All", "Exact Reconstruction", "Near-Exact", "Partial", "Protected"] as const).map((f) => (
+              <button key={f} onClick={() => { setDiffFilter(f); setDiffPage(0); }}
+                className={`text-xs px-2 py-0.5 rounded border transition-colors ${diffFilter === f ? "bg-primary text-primary-foreground border-primary" : "border-muted hover:bg-muted"}`}>
+                {f === "Exact Reconstruction" ? "🔴 Exact" : f === "Near-Exact" ? "🟠 Near-Exact" : f === "Partial" ? "🟡 Partial" : f === "Protected" ? "🟢 Protected" : "Show All"}
+              </button>
+            ))}
+            <input value={diffSearch} onChange={(e) => { setDiffSearch(e.target.value); setDiffPage(0); }}
+              placeholder="Search QI values…" className="text-xs px-2 py-0.5 rounded border border-muted bg-background w-40" />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[300px]">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-background z-10">
+                <tr className="border-b">
+                  <th className="text-left pb-1 pr-2">Row #</th>
+                  {r.quasiIdentifiers.map((qi) => <th key={qi} className="text-left pb-1 pr-2">{qi}</th>)}
+                  <th className="text-right pb-1 pr-2">EC Size</th>
+                  <th className="text-right pb-1 pr-2">Diff Risk</th>
+                  <th className="text-left pb-1 pr-2">Vulnerability</th>
+                  <th className="text-center pb-1 pr-2">Query Pair?</th>
+                  <th className="text-center pb-1">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pagedRecords.map((row, i) => (
+                  <tr key={i} className="border-b border-muted hover:bg-muted/30">
+                    <td className="py-1 pr-2">#{row.rowIdx}</td>
+                    {r.quasiIdentifiers.map((qi) => <td key={qi} className="py-1 pr-2 text-muted-foreground">{row.qiValues[qi]}</td>)}
+                    <td className="py-1 pr-2 text-right">{row.ecSize}</td>
+                    <td className="py-1 pr-2 text-right font-bold" style={{ color: diffLabelColor(row.diffLabel) }}>{row.diffRisk.toFixed(2)}</td>
+                    <td className="py-1 pr-2"><span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${diffLabelBg(row.diffLabel)}`}>{row.diffLabel}</span></td>
+                    <td className="py-1 pr-2 text-center">{row.queryPairPossible ? <span className="text-red-600 font-bold">Yes</span> : <span className="text-green-600">No</span>}</td>
+                    <td className="py-1 text-center">{row.atRisk ? "🔴 At Risk" : "🟢 Protected"}</td>
+                  </tr>
+                ))}
+                {pagedRecords.length === 0 && <tr><td colSpan={r.quasiIdentifiers.length + 6} className="py-4 text-center text-muted-foreground">No records match filter.</td></tr>}
+              </tbody>
+            </table>
+          </ScrollArea>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+              <span>Page {diffPage + 1} of {totalPages} ({filteredRecords.length} records)</span>
+              <div className="flex gap-1">
+                <button onClick={() => setDiffPage((p) => Math.max(0, p - 1))} disabled={diffPage === 0} className="px-2 py-0.5 border rounded disabled:opacity-40">← Prev</button>
+                <button onClick={() => setDiffPage((p) => Math.min(totalPages - 1, p + 1))} disabled={diffPage >= totalPages - 1} className="px-2 py-0.5 border rounded disabled:opacity-40">Next →</button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* §5.5 Attack Simulation Narrative */}
+      {mv && (
+        <Card className="border-red-200 dark:border-red-800 bg-red-50/30 dark:bg-red-950/20">
+          <CardHeader><CardTitle className="text-sm">§5.5 Attack Simulation — How This Attack Works on YOUR Data</CardTitle></CardHeader>
+          <CardContent>
+            <pre className="text-xs font-mono bg-muted/50 rounded p-3 overflow-x-auto whitespace-pre-wrap leading-5">
+{`DIFFERENCING ATTACK SIMULATION — Step by Step
+
+Step 1 — Setup
+  The attacker has access to a query interface over this dataset.
+  They do NOT have access to individual records.
+  They know that person X has these quasi-identifier values:
+${r.quasiIdentifiers.map((qi) => `    ${qi} = ${mv.qiValues[qi] ?? "?"}`).join("\n")}
+
+Step 2 — Query 1 (Full Group)
+  Attacker issues: SELECT ${mv.isNumericSA ? "AVG" : "COUNT"} of ${mv.saName}
+                   WHERE ${r.quasiIdentifiers.map((qi) => `${qi}='${mv.qiValues[qi]}'`).join(" AND ")}
+  
+  Result: ${mv.r1 !== null ? mv.r1 : "—"}   (based on ${mv.ecSize} records)
+
+Step 3 — Query 2 (Group Minus Target)
+  Attacker issues: SELECT ${mv.isNumericSA ? "AVG" : "COUNT"} of ${mv.saName}
+                   WHERE ${r.quasiIdentifiers.map((qi) => `${qi}='${mv.qiValues[qi]}'`).join(" AND ")}
+                   AND rowid != ${mv.rowIdx}   ← attacker excludes target using auxiliary fact
+  
+  Result: ${mv.r2 !== null ? mv.r2 : "—"}   (based on ${mv.ecSize - 1} records)
+
+Step 4 — Reconstruction via Subtraction
+  Person X's ${mv.saName} = (Query_1 × ${mv.ecSize}) − (Query_2 × ${mv.ecSize - 1})
+                           = (${mv.r1} × ${mv.ecSize}) − (${mv.r2} × ${mv.ecSize - 1})
+                           = ${mv.reconstructedValue ?? "—"}
+  
+  ✅ Attack successful. Person X's ${mv.saName} = ${mv.reconstructedValue ?? "—"}
+     Reconstructed with ${(mv.diffRisk * 100).toFixed(0)}% certainty.
+
+Step 5 — Scale
+  Records reconstructable with certainty (EC=1):  ${r.exactCount}
+  Records reconstructable with high accuracy:      ${r.exactCount + r.nearExactCount}
+  Coverage rate:                                   ${r.coverageRate.toFixed(1)}%
+  
+  An attacker with query access could reconstruct the sensitive
+  attributes of ${r.coverageRate.toFixed(1)}% of this dataset without ever
+  seeing a single raw record.`}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §5.7 SA Reconstruction Analysis */}
+      {r.saReconstruction.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm">§5.7 SA Reconstruction Analysis</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            {r.saReconstruction.map((sa) => (
+              <div key={sa.sa} className="border rounded p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">{sa.sa}</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-muted">{sa.isNumericSA ? "Numeric" : "Categorical / Binary"}</span>
+                </div>
+                {sa.isNumericSA ? (
+                  <Fragment>
+                    <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                      <span>Global range: <strong className="text-foreground">{sa.saMin.toFixed(2)} – {sa.saMax.toFixed(2)}</strong> (range = {sa.saRange.toFixed(2)})</span>
+                      <span>Global std dev: <strong className="text-foreground">{sa.saStd}</strong></span>
+                      <span>ECs where exact recon possible: <strong className="text-red-600">{sa.exactReconEcs}</strong></span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead><tr className="border-b text-muted-foreground">
+                          <th className="text-left pb-1">EC Size</th>
+                          <th className="text-right pb-1">Recon Error (σ)</th>
+                          <th className="text-right pb-1">Error as % of Range</th>
+                          <th className="text-right pb-1">Verdict</th>
+                        </tr></thead>
+                        <tbody>
+                          {sa.reconstructionTable.map((row) => (
+                            <tr key={row.ecSize} className="border-b border-muted">
+                              <td className="py-1">{row.ecSize}{row.ecSize === 1 ? " (Exact)" : ""}</td>
+                              <td className="py-1 text-right">{row.ecSize === 1 ? "0" : `σ/√${row.ecSize} = ${row.reconError}`}</td>
+                              <td className="py-1 text-right">{row.errorPct}%</td>
+                              <td className="py-1 text-right">{row.verdict}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="text-xs bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded p-2 mt-1">
+                      <strong>Required Noise for DP Protection:</strong> To prevent differencing on <em>{sa.sa}</em>, any published aggregate must include Laplace noise with std ≥ <strong>{sa.requiredNoiseStd.toFixed(2)}</strong> (at ε = 1.0). This corresponds to a ±{(sa.requiredNoiseStd * 2).toFixed(2)} uncertainty in any reported figure.
+                    </div>
+                  </Fragment>
+                ) : (
+                  <div className="text-xs space-y-1">
+                    <p>Count-based differencing can reveal whether the target has a specific <em>{sa.sa}</em> value (e.g., Yes or No).</p>
+                    <p>ECs where count differencing reveals SA value: <strong className="text-red-600">{sa.exactReconEcs}</strong></p>
+                    <p>Required protection: Add ±1 count noise to all published group counts.</p>
+                    <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded p-2">
+                      Required noise std (at ε = 1.0): <strong>1.00</strong> (binary SA sensitivity = 1)
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §5.8 DP Noise Sufficiency Check */}
+      <Card className="border-yellow-200 dark:border-yellow-800">
+        <CardHeader><CardTitle className="text-sm">§5.8 Differential Privacy Noise Sufficiency Check</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">For the differencing attack to be blocked, any aggregate release of this dataset must add noise with standard deviation at least equal to the SA sensitivity divided by the privacy budget ε.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="border-b text-muted-foreground">
+                <th className="text-left pb-1">Sensitive Attribute</th>
+                <th className="text-right pb-1">SA Sensitivity</th>
+                <th className="text-right pb-1">Required Noise Std (ε=1)</th>
+                <th className="text-right pb-1">Current Protection</th>
+              </tr></thead>
+              <tbody>
+                {r.saReconstruction.length > 0 ? r.saReconstruction.map((sa) => (
+                  <tr key={sa.sa} className="border-b border-muted">
+                    <td className="py-1 font-medium">{sa.sa}</td>
+                    <td className="py-1 text-right">{sa.isNumericSA ? sa.saRange.toFixed(2) : "1 (binary)"}</td>
+                    <td className="py-1 text-right font-bold text-orange-600">{sa.requiredNoiseStd.toFixed(2)}</td>
+                    <td className="py-1 text-right text-red-600">❌ None added</td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan={4} className="py-2 text-muted-foreground text-center">No sensitive attributes selected.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2 text-xs bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded p-2">
+            <span className="text-red-600 font-bold">🔴</span>
+            <span>No differential privacy noise detected. Aggregates derived from this data are vulnerable to differencing.</span>
+          </div>
+          <p className="text-xs text-muted-foreground">Before publishing any aggregate statistics from this dataset, apply Laplace or Gaussian noise with the required std above. Use the Privacy Enhancement module to apply DP noise.</p>
+        </CardContent>
+      </Card>
+
+      {/* §5.9 L-Diversity per SA */}
+      {r.lDivResults.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm">§5.9 L-Diversity Check (Per Sensitive Attribute)</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {r.lDivResults.map((res) => (
+              <div key={res.sa} className="border rounded p-3 text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">{res.sa}</span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${res.lStatus === "PASS" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"}`}>{res.lStatus === "PASS" ? "🟢 PASS" : "🔴 FAIL"}</span>
+                </div>
+                <p>Minimum distinct SA values in any EC: <strong>{res.minL}</strong></p>
+                <p>ECs violating l-diversity: <strong className={res.violatingEcs > 0 ? "text-red-600" : ""}>{res.violatingEcs}</strong> out of {res.totalEcs} ({res.totalEcs > 0 ? ((res.violatingEcs / res.totalEcs) * 100).toFixed(1) : 0}%)</p>
+                <p className="text-muted-foreground italic">Note: L-Diversity does NOT prevent differencing attacks. Even if this check passes, differencing can still reconstruct SA values from aggregate queries on small ECs.</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §5.10 T-Closeness per SA */}
+      {r.tCloseResults.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm">§5.10 T-Closeness Check (Per Sensitive Attribute)</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {r.tCloseResults.map((res) => (
+              <div key={res.sa} className="border rounded p-3 text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">{res.sa}</span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${res.tStatus === "PASS" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"}`}>{res.tStatus === "PASS" ? "🟢 PASS" : "🔴 FAIL"}</span>
+                </div>
+                <p>Maximum EC deviation (TVD): <strong>{res.maxDistance}</strong></p>
+                <p>ECs violating t-closeness: <strong className={res.violatingEcs > 0 ? "text-red-600" : ""}>{res.violatingEcs}</strong> out of {res.totalEcs} ({res.totalEcs > 0 ? ((res.violatingEcs / res.totalEcs) * 100).toFixed(1) : 0}%)</p>
+                <p className="text-muted-foreground italic">Note: T-Closeness does NOT prevent differencing attacks. Differencing exploits aggregate arithmetic, not distributional skewness. DP noise is the correct countermeasure.</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §5.11 Top 10 vulnerable records */}
+      <Card>
+        <CardHeader><CardTitle className="text-sm">§5.11 Top Vulnerable Records</CardTitle></CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[220px]">
+            <table className="w-full text-xs">
+              <thead><tr className="border-b text-muted-foreground">
+                <th className="text-left pb-1">Rank</th>
+                <th className="text-left pb-1">QI Combination</th>
+                <th className="text-right pb-1">EC Size</th>
+                <th className="text-right pb-1">Diff Risk</th>
+                <th className="text-left pb-1">Label</th>
+                <th className="text-left pb-1">Why Vulnerable</th>
+              </tr></thead>
+              <tbody>
+                {r.topVulnerable.map((row) => (
+                  <tr key={row.rank} className="border-b border-muted">
+                    <td className="py-1 font-bold">#{row.rank}</td>
+                    <td className="py-1 font-mono text-muted-foreground max-w-[160px] truncate" title={row.qiCombo}>{row.qiCombo}</td>
+                    <td className="py-1 text-right">{row.ecSize}</td>
+                    <td className="py-1 text-right font-bold" style={{ color: diffLabelColor(row.diffLabel) }}>{row.diffRisk.toFixed(2)}</td>
+                    <td className="py-1"><span className={`px-1.5 py-0.5 rounded text-[10px] ${diffLabelBg(row.diffLabel)}`}>{row.diffLabel}</span></td>
+                    <td className="py-1 text-muted-foreground">{row.whyVulnerable}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollArea>
+          <p className="text-xs text-muted-foreground mt-2 italic">These records' sensitive attribute values can be reconstructed from aggregate query responses — no raw data access required. Apply differential privacy noise before publishing any statistics derived from this dataset.</p>
+        </CardContent>
+      </Card>
+
+      {/* §5.12 Query Pair Catalogue */}
+      {r.queryPairs.length > 0 && (
+        <Card className="border-red-200 dark:border-red-800">
+          <CardHeader><CardTitle className="text-sm">§5.12 Query Pair Catalogue — Attacker's Playbook (Top {r.queryPairs.length} Most Vulnerable Records)</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            {r.queryPairs.map((qp) => (
+              <div key={qp.rank} className="border rounded bg-muted/30">
+                <div className="px-3 py-1.5 border-b bg-muted/50 text-xs font-bold">
+                  Query Pair #{qp.rank} — Targets Row #{qp.rowIdx}  (EC size = {qp.ecSize}, Diff Risk = {qp.diffRisk.toFixed(2)})
+                </div>
+                <pre className="text-xs font-mono p-3 overflow-x-auto whitespace-pre-wrap leading-5">
+{`Query A:  SELECT ${qp.r1 !== null ? "AVG" : "COUNT"}(${qp.saName})
+          FROM dataset
+          WHERE ${qp.qiConditions}
+          → Result: ${qp.r1 !== null ? qp.r1 : "—"}  (n = ${qp.ecSize} records)
+
+Query B:  SELECT ${qp.r1 !== null ? "AVG" : "COUNT"}(${qp.saName})
+          FROM dataset
+          WHERE ${qp.qiConditions}
+          AND rowid != ${qp.rowIdx}
+          → Result: ${qp.r2 !== null ? qp.r2 : "—"}  (n = ${qp.ecSize - 1} records)
+
+Reconstruction:
+  ${qp.formula}
+  → Target ${qp.saName} = ${qp.reconstructedValue ?? "—"}`}
+                </pre>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* §5.13 Recommendations */}
       <RecommendationsCard recs={r.recommendations} />
     </div>
   );
@@ -4230,7 +4586,7 @@ function ComparisonDashboard({ results }: { results: AllResults }) {
     { attack: "Membership",           result: results.membership,           key: "membership" as AttackId,           threat: "Presence detection",          metric: results.membership ? `AUC ${results.membership.aucScore.toFixed(2)}` : "—" },
     { attack: "Record Linkage",       result: results.recordLinkage,        key: "recordLinkage" as AttackId,        threat: "External dataset re-ID",      metric: results.recordLinkage ? `${results.recordLinkage.numUniqueRecords} certain links` : "—" },
     { attack: "Attr. Disclosure",     result: results.attributeDisclosure,  key: "attributeDisclosure" as AttackId,  threat: "Sensitive value inference",   metric: results.attributeDisclosure ? `ADR ${(results.attributeDisclosure.overallAdr * 100).toFixed(1)}%` : "—" },
-    { attack: "Differencing",         result: results.differencing,         key: "differencing" as AttackId,         threat: "Aggregate query leakage",     metric: results.differencing ? `${results.differencing.leakyPct}% leaky queries` : "—" },
+    { attack: "Differencing",         result: results.differencing,         key: "differencing" as AttackId,         threat: "Aggregate query leakage",     metric: results.differencing ? `DDR ${(results.differencing.ddr * 100).toFixed(1)}%` : "—" },
     { attack: "Model Inversion",      result: results.modelInversion,       key: "modelInversion" as AttackId,       threat: "Attribute reconstruction",    metric: results.modelInversion ? `${results.modelInversion.inversionRate}% inverted` : "—" },
   ];
 
@@ -4465,7 +4821,7 @@ export default function RiskPage() {
     if (selectedAttacks.includes("membership"))          steps.push({ id: "membership",          label: "Membership Inference Attack (Gower NN + Population Rarity)...", fn: () => { newResults.membership          = runMembershipAttack(rawData, quasiIdentifiers, sensitiveAttributes, autoAssist?.columnGroups.directIdentifiers ?? []); } });
     if (selectedAttacks.includes("recordLinkage"))       steps.push({ id: "recordLinkage",       label: "Record Linkage Attack (External Dataset Re-ID)...",          fn: () => { newResults.recordLinkage       = runRecordLinkageAttack(rawData, quasiIdentifiers, kThreshold[0], sensitiveAttributes, lThreshold[0], tVal); } });
     if (selectedAttacks.includes("attributeDisclosure")) steps.push({ id: "attributeDisclosure", label: "Attribute Disclosure Attack (Sensitive Inference)...",        fn: () => { newResults.attributeDisclosure = runAttributeDisclosureAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0], tVal); } });
-    if (selectedAttacks.includes("differencing"))        steps.push({ id: "differencing",        label: "Differencing Attack (Aggregate Query Leakage)...",            fn: () => { newResults.differencing        = runDifferencingAttack(rawData, quasiIdentifiers); } });
+    if (selectedAttacks.includes("differencing"))        steps.push({ id: "differencing",        label: "Differencing Attack (Aggregate Query Leakage)...",            fn: () => { newResults.differencing        = runDifferencingAttack(rawData, quasiIdentifiers, sensitiveAttributes, kThreshold[0], lThreshold[0], tVal); } });
     if (selectedAttacks.includes("modelInversion"))      steps.push({ id: "modelInversion",      label: "Model Inversion Attack (Naïve Bayes Reconstruction)...",      fn: () => { newResults.modelInversion      = runModelInversionAttack(rawData, quasiIdentifiers, sensitiveAttributes); } });
 
     for (let i = 0; i < steps.length; i++) {
