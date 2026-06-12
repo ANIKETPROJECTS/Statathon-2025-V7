@@ -2474,15 +2474,18 @@ function ComparisonDashboard({ results }: { results: AllResults }) {
 
   const radarData = c.breakdown.map((b) => ({
     attack: b.attack,
-    risk: parseFloat((b.risk * 100).toFixed(1)),
-    safe: Math.max(0, 30 - b.risk * 100),
+    risk: b.enabled ? b.risk : 0,
+    safe: b.enabled ? Math.max(0, 30 - b.risk) : 0,
   }));
 
-  const barData = [...c.breakdown].sort((a, b) => b.risk - a.risk).map((b) => ({
-    name: b.attack,
-    risk: parseFloat((b.risk * 100).toFixed(1)),
-    color: RISK_COLORS[b.risk >= 0.7 ? "CRITICAL" : b.risk >= 0.5 ? "HIGH" : b.risk >= 0.3 ? "MEDIUM" : "LOW"],
-  }));
+  const barData = [...c.breakdown]
+    .filter((b) => b.enabled)
+    .sort((a, b) => b.risk - a.risk)
+    .map((b) => ({
+      name: b.attack,
+      risk: b.risk,
+      color: RISK_COLORS[b.risk >= 70 ? "CRITICAL" : b.risk >= 50 ? "HIGH" : b.risk >= 30 ? "MEDIUM" : "LOW"],
+    }));
 
   const tableRows = [
     { attack: "Prosecutor",           result: results.prosecutor,           key: "prosecutor" as AttackId,           threat: "Within-dataset re-ID",       metric: results.prosecutor ? `${results.prosecutor.uniqueRecordsCount} unique records` : "—" },
@@ -2514,6 +2517,7 @@ function ComparisonDashboard({ results }: { results: AllResults }) {
           <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">NIST Composite Risk Score</div>
           <div className={`text-6xl font-black ${scoreColor}`}>{c.score}</div>
           <div className="text-sm text-muted-foreground mt-1">/ 100</div>
+          <div className="mt-1 text-xs text-muted-foreground">{c.enabledCount} of 10 attacks run</div>
           <div className="mt-3">{riskBadge(c.riskLevel)}</div>
           <div className="mt-4 w-full">
             <Progress value={c.score} className="h-3" />
@@ -2541,11 +2545,20 @@ function ComparisonDashboard({ results }: { results: AllResults }) {
             <div className="space-y-2">
               {c.breakdown.map((b) => (
                 <div key={b.attack} className="flex items-center gap-2">
-                  <span className="text-xs w-20 text-muted-foreground">{b.attack}</span>
-                  <Progress value={b.risk * 100} className="flex-1 h-2" />
-                  <span className="text-xs font-bold w-10 text-right" style={{ color: RISK_COLORS[b.risk >= 0.7 ? "CRITICAL" : b.risk >= 0.5 ? "HIGH" : b.risk >= 0.3 ? "MEDIUM" : "LOW"] }}>
-                    {(b.risk * 100).toFixed(0)}%
-                  </span>
+                  <span className={`text-xs w-20 truncate ${b.enabled ? "" : "text-muted-foreground/50"}`}>{b.attack}</span>
+                  {b.enabled ? (
+                    <>
+                      <Progress value={b.risk} className="flex-1 h-2" />
+                      <span className="text-xs font-bold w-12 text-right" style={{ color: RISK_COLORS[b.risk >= 70 ? "CRITICAL" : b.risk >= 50 ? "HIGH" : b.risk >= 30 ? "MEDIUM" : "LOW"] }}>
+                        {b.risk.toFixed(0)}%
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex-1 h-2 rounded-full bg-muted/30" />
+                      <span className="text-xs text-muted-foreground/50 w-12 text-right italic">—</span>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -2729,18 +2742,19 @@ export default function RiskPage() {
       await new Promise((r) => setTimeout(r, 20));
     }
 
-    // Composite score
+    // Composite score — only pass scores for attacks that were actually run.
+    // Unrun attacks are omitted (undefined) so they don't dilute the average.
     newResults.composite = computeCompositeScore({
-      prosecutor:          newResults.prosecutor?.riskScore          ?? 0,
-      journalist:          newResults.journalist?.riskScore          ?? 0,
-      marketer:            newResults.marketer?.riskScore            ?? 0,
-      singlingOut:         newResults.singlingOut?.riskScore         ?? 0,
-      inference:           newResults.inference?.riskScore           ?? 0,
-      membership:          newResults.membership?.riskScore          ?? 0,
-      recordLinkage:       newResults.recordLinkage?.riskScore       ?? 0,
-      attributeDisclosure: newResults.attributeDisclosure?.riskScore ?? 0,
-      differencing:        newResults.differencing?.riskScore        ?? 0,
-      modelInversion:      newResults.modelInversion?.riskScore      ?? 0,
+      ...(newResults.prosecutor          && { prosecutor:          newResults.prosecutor.riskScore }),
+      ...(newResults.journalist          && { journalist:          newResults.journalist.riskScore }),
+      ...(newResults.marketer            && { marketer:            newResults.marketer.riskScore }),
+      ...(newResults.singlingOut         && { singlingOut:         newResults.singlingOut.riskScore }),
+      ...(newResults.inference           && { inference:           newResults.inference.riskScore }),
+      ...(newResults.membership          && { membership:          newResults.membership.riskScore }),
+      ...(newResults.recordLinkage       && { recordLinkage:       newResults.recordLinkage.riskScore }),
+      ...(newResults.attributeDisclosure && { attributeDisclosure: newResults.attributeDisclosure.riskScore }),
+      ...(newResults.differencing        && { differencing:        newResults.differencing.riskScore }),
+      ...(newResults.modelInversion      && { modelInversion:      newResults.modelInversion.riskScore }),
     });
 
     setResults(newResults);
