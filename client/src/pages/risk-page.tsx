@@ -1532,67 +1532,442 @@ function SinglingOutReport({ r }: { r: SingleOutResult }) {
   );
 }
 
+function inferenceFormAColor(risk: number): string {
+  return risk >= 0.70 ? "#DC2626" : risk >= 0.40 ? "#D97706" : "#16A34A";
+}
+function inferenceFormABg(risk: number): string {
+  return risk >= 0.70 ? "bg-red-50 border-red-200" : risk >= 0.40 ? "bg-amber-50 border-amber-200" : "bg-green-50 border-green-200";
+}
+function inferenceFormAEmoji(status: string): string {
+  return status === "CRITICAL" ? "🔴" : status === "MEDIUM" ? "🟡" : "🟢";
+}
+function inferenceLiftEmoji(status?: string): string {
+  return status === "CRITICAL" ? "🔴" : status === "MEDIUM" ? "🟡" : "🟢";
+}
+
 function InferenceReport({ r }: { r: InferenceResult }) {
+  const [selectedSA, setSelectedSA] = useState(0);
+
+  const qiList = r.quasiIdentifiers.join(", ") || "—";
+  const saList = r.sensitiveAttributes.join(", ") || "—";
+
+  // Worst EC for narrative
+  const worstEC = r.perSAResults.length > 0
+    ? r.perSAResults[0]?.formA.ecBreakdown[0]
+    : null;
+  const narrativeSA = r.perSAResults[0];
+
+  // §8.8 high-risk record % per SA
+  const riskSummaryBars = r.perSAResults.map((sa) => ({
+    label: sa.sa,
+    pct: sa.formA.highRiskRecordPct,
+    status: sa.formAStatus,
+  }));
+
+  // All ECs from selected SA for cross-check table
+  const crossCheckSA = r.perSAResults[selectedSA];
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCard("Attack Accuracy", `${r.attackAccuracy}%`, "5-fold CV accuracy", <Brain className="h-4 w-4" />, "text-red-600")}
-        {kpiCard("Baseline Accuracy", `${r.baselineAccuracy}%`, "Best random guess", <BarChart3 className="h-4 w-4" />)}
-        {kpiCard("Information Gain", `${r.infoGain}%`, "Attack above baseline", <AlertTriangle className="h-4 w-4" />, r.infoGain > 10 ? "text-red-600" : "text-green-600")}
-        {kpiCard("Risk Level", r.riskLevel, "Based on information gain", <Shield className="h-4 w-4" />, r.riskLevel === "CRITICAL" || r.riskLevel === "HIGH" ? "text-red-600" : "text-green-600")}
+
+      {/* ── §8.1 Attack Summary Banner ───────────────────────────────────────── */}
+      <Card className={`border-2 ${inferenceFormABg(r.overallFormARisk)}`}>
+        <CardContent className="pt-4 pb-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">🟣</div>
+              <div>
+                <div className="font-bold text-base">INFERENCE ATTACK RESULTS</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Rows analysed: <strong>{r.sampleN.toLocaleString()}</strong> &nbsp;|&nbsp;
+                  QIs used: <strong>{qiList}</strong> &nbsp;|&nbsp;
+                  Sensitive Attributes analysed: <strong>{saList}</strong>
+                </div>
+              </div>
+            </div>
+            <Badge style={{ backgroundColor: inferenceFormAColor(r.overallFormARisk), color: "#fff" }} className="text-sm px-3 py-1">
+              RISK: {r.overallFormARisk >= 0.70 ? "HIGH" : r.overallFormARisk >= 0.40 ? "MEDIUM" : "LOW"}
+            </Badge>
+          </div>
+          {r.smallSampleWarning && (
+            <div className="mt-2 p-2 bg-amber-100 dark:bg-amber-900/30 rounded text-xs border border-amber-300 text-amber-800 dark:text-amber-200">
+              ⚠️ Sample size too small for robust statistical inference — results are indicative only. Form A confidence scores near 1.0 may simply reflect small-sample noise.
+            </div>
+          )}
+          <div className="mt-3 p-3 bg-white/60 dark:bg-black/20 rounded text-sm border">
+            An attacker who knows someone's <strong>{qiList}</strong> — WITHOUT needing to find that person's exact row — can guess their{" "}
+            <strong>{r.highestFormARiskSA}</strong> correctly{" "}
+            <strong>{(r.highestFormARisk * 100).toFixed(1)}%</strong> of the time on average (Form A).
+            {r.formBComputedCount > 0 && (
+              <> Additionally, knowing QIs improves prediction accuracy of <strong>{r.highestFormBLiftSA}</strong>{" "}
+              by <strong>+{r.highestFormBLift.toFixed(1)}pp</strong> over a naive guess (Form B Inference Lift).</>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── §8.2 Key Metrics Row ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        {kpiCard(
+          "Highest Form A Risk",
+          `${(r.highestFormARisk * 100).toFixed(1)}%`,
+          `Worst-case SA: ${r.highestFormARiskSA}`,
+          <Brain className="h-4 w-4" />,
+          r.highestFormARisk >= 0.70 ? "text-red-600" : r.highestFormARisk >= 0.40 ? "text-amber-600" : "text-green-600"
+        )}
+        {kpiCard(
+          "Avg Form A Risk",
+          `${(r.overallFormARisk * 100).toFixed(1)}%`,
+          "Overall attribute-guessing risk across all SAs",
+          <AlertTriangle className="h-4 w-4" />,
+          r.overallFormARisk >= 0.70 ? "text-red-600" : r.overallFormARisk >= 0.40 ? "text-amber-600" : "text-green-600"
+        )}
+        {kpiCard(
+          "Highest Form B Lift",
+          r.formBComputedCount > 0 ? `+${r.highestFormBLift.toFixed(1)}pp` : "N/A",
+          r.formBComputedCount > 0 ? `Worst SA: ${r.highestFormBLiftSA}` : "Insufficient data for all SAs",
+          <BarChart3 className="h-4 w-4" />,
+          r.highestFormBLift > 30 ? "text-red-600" : r.highestFormBLift > 10 ? "text-amber-600" : "text-green-600"
+        )}
+        {kpiCard(
+          "Form B Computed",
+          `${r.formBComputedCount} / ${r.sensitiveAttributes.length}`,
+          "SAs with enough data for global model",
+          <CheckCircle className="h-4 w-4" />,
+          "text-blue-600"
+        )}
+        {kpiCard(
+          "Hidden Risk ECs",
+          r.hiddenRiskECs,
+          "ECs that PASS L-Diversity but have Form A > 70%",
+          <Eye className="h-4 w-4" />,
+          r.hiddenRiskECs > 0 ? "text-red-600" : "text-green-600"
+        )}
       </div>
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Feature Importance (Gini)</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={r.featureImportance} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="qi" tick={{ fontSize: 10 }} width={90} />
-                <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="importance" fill="#2563EB" radius={[0, 4, 4, 0]} name="Importance" />
-              </BarChart>
-            </ResponsiveContainer>
+
+      {/* ── §8.3 Per-SA Breakdown ─────────────────────────────────────────────── */}
+      {r.perSAResults.map((sa, saIdx) => (
+        <Card key={sa.sa} className={`border ${inferenceFormABg(sa.formA.datasetRisk)}`}>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-bold tracking-wide">
+                SENSITIVE ATTRIBUTE: {sa.sa}
+              </CardTitle>
+              <Badge style={{ backgroundColor: inferenceFormAColor(sa.formA.datasetRisk), color: "#fff" }}>
+                {inferenceFormAEmoji(sa.formAStatus)} {sa.formAStatus}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Form A */}
+            <div className="p-3 rounded border bg-white/50 dark:bg-black/20">
+              <div className="font-semibold text-xs mb-2 text-muted-foreground uppercase tracking-wider">Form A — Group-Based Inference</div>
+              <div className="flex items-center gap-4 mb-3">
+                <div>
+                  <div className="text-xs text-muted-foreground">Dataset-wide avg confidence</div>
+                  <div className="text-2xl font-bold" style={{ color: inferenceFormAColor(sa.formA.datasetRisk) }}>
+                    {(sa.formA.datasetRisk * 100).toFixed(1)}%
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Records in high-risk groups (≥70%)</div>
+                  <div className="text-xl font-bold text-red-600">{sa.formA.highRiskRecordPct.toFixed(1)}%</div>
+                </div>
+              </div>
+              <div className="text-xs font-semibold text-muted-foreground mb-1">Worst Equivalence Classes (top 10 by confidence):</div>
+              <ScrollArea className="h-[160px]">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left pb-1">QI Combination</th>
+                      <th className="text-right pb-1">EC Size</th>
+                      <th className="text-right pb-1">Most Common {sa.sa}</th>
+                      <th className="text-right pb-1">Confidence</th>
+                      <th className="text-left pb-1 pl-2">Distribution</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sa.formA.ecBreakdown.slice(0, 10).map((ec, i) => (
+                      <tr key={i} className="border-b border-muted">
+                        <td className="py-1 truncate max-w-[150px] text-muted-foreground" title={ec.qiCombo}>{ec.qiCombo.slice(0, 35)}</td>
+                        <td className="py-1 text-right">{ec.ecSize}</td>
+                        <td className="py-1 text-right font-medium">{ec.mostCommonValue}</td>
+                        <td className="py-1 text-right font-bold" style={{ color: inferenceFormAColor(ec.confidence) }}>
+                          {(ec.confidence * 100).toFixed(0)}%
+                        </td>
+                        <td className="py-1 pl-2 text-muted-foreground">
+                          {"{" + Object.entries(ec.distribution).map(([k, v]) => `${k}:${v}`).join(", ") + "}"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ScrollArea>
+            </div>
+
+            {/* Form B */}
+            <div className="p-3 rounded border bg-white/50 dark:bg-black/20">
+              <div className="font-semibold text-xs mb-2 text-muted-foreground uppercase tracking-wider">Form B — Global Predictive Inference</div>
+              {sa.formB.status === "insufficient_data" && (
+                <div className="p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 rounded text-xs text-amber-800 dark:text-amber-200">
+                  ⚠️ {sa.formB.message}
+                </div>
+              )}
+              {sa.formB.status === "ok" && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Baseline accuracy</div>
+                    <div className="font-bold text-lg text-green-600">{sa.formB.baselineAccuracy}%</div>
+                    <div className="text-xs text-muted-foreground">Always-guess-mode</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Attacker accuracy</div>
+                    <div className="font-bold text-lg" style={{ color: inferenceFormAColor((sa.formB.attackerAccuracy ?? 0) / 100) }}>
+                      {sa.formB.attackerAccuracy}%
+                    </div>
+                    <div className="text-xs text-muted-foreground">QI→SA model</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Inference Lift</div>
+                    <div className="font-bold text-lg" style={{ color: (sa.formB.inferenceLift ?? 0) > 10 ? "#DC2626" : "#16A34A" }}>
+                      {(sa.formB.inferenceLift ?? 0) >= 0 ? "+" : ""}{sa.formB.inferenceLift}pp
+                    </div>
+                    <div className="text-xs font-medium">{inferenceLiftEmoji(sa.formB.liftStatus)} {sa.formB.liftStatus}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">CV Method</div>
+                    <div className="font-bold text-sm">{sa.formB.cvMethod}</div>
+                  </div>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
+      ))}
+
+      {/* ── §8.4 Attack Narrative ────────────────────────────────────────────── */}
+      {narrativeSA && worstEC && (
         <Card>
-          <CardHeader><CardTitle className="text-sm">Attack vs Baseline Accuracy</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={r.accuracyComparison}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} unit="%" />
-                <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="value" radius={[4, 4, 0, 0]} name="Accuracy %">
-                  <Cell fill="#DC2626" />
-                  <Cell fill="#16A34A" />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <CardHeader><CardTitle className="text-sm">🔍 Attack Simulation — Inference Attack Walkthrough</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-purple-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Scenario</div>
+              An attacker (e.g., a data broker, employer, or insurer) has access to this released dataset. They know ONE thing about a person — their{" "}
+              <strong>{qiList}</strong> value: <em>perhaps from a job application form.</em> They do NOT know which row in this dataset belongs to that person, and they don't need to.
+            </div>
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-red-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 1 — Filter by known QI</div>
+              The attacker filters the dataset to all <strong>{worstEC.ecSize}</strong> records where <strong>{worstEC.qiCombo}</strong>. (No re-identification — just a group filter.)
+            </div>
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-orange-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 2 — Read off the dominant Sensitive Attribute value</div>
+              Within this group, <strong>{worstEC.distribution[worstEC.mostCommonValue] ?? "?"}</strong> out of{" "}
+              <strong>{worstEC.ecSize}</strong> records have <strong>{narrativeSA.sa} = {worstEC.mostCommonValue}</strong>. The attacker concludes:{" "}
+              <em>"{(worstEC.confidence * 100).toFixed(0)}% chance this person's {narrativeSA.sa} is {worstEC.mostCommonValue}."</em>
+            </div>
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-amber-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 3 — Use the inference</div>
+              The attacker now has a high-confidence guess about this person's <strong>{narrativeSA.sa}</strong> (e.g., Social_Group, Religion, Land holdings) <strong>WITHOUT EVER KNOWING WHICH ROW BELONGED TO THEM</strong>. K-anonymity, which only protects against row-identification, provides NO protection against this.
+            </div>
+            <div className="p-3 bg-muted/40 rounded border-l-4 border-blue-500">
+              <div className="font-semibold text-xs text-muted-foreground mb-1">Step 4 — Scale</div>
+              {narrativeSA.formA.ecBreakdown.filter((e) => e.confidence >= 0.80).length} out of{" "}
+              {narrativeSA.formA.ecBreakdown.length} equivalence classes have Form A confidence ≥ 80% for{" "}
+              <strong>{narrativeSA.sa}</strong>.{" "}
+              <strong>{narrativeSA.formA.highRiskRecordPct.toFixed(1)}%</strong> of records fall into high-inference-risk groups.
+            </div>
           </CardContent>
         </Card>
-        <Card className="md:col-span-2">
-          <CardHeader><CardTitle className="text-sm">Per Sensitive Attribute Analysis</CardTitle></CardHeader>
+      )}
+
+      {/* ── §8.5 Form A Confidence Distribution Chart (per SA, tabbed) ──────── */}
+      {r.perSAResults.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Form A Confidence Distribution by Sensitive Attribute</CardTitle>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {r.perSAResults.map((sa, i) => (
+                <Button key={sa.sa} size="sm" variant={selectedSA === i ? "default" : "outline"} className="text-xs h-7"
+                  onClick={() => setSelectedSA(i)}>{sa.sa}</Button>
+              ))}
+            </div>
+          </CardHeader>
+          {r.perSAResults[selectedSA] && (
+            <CardContent>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={r.perSAResults[selectedSA].formA.confidenceDistribution}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip {...CHART_TOOLTIP} />
+                  <Bar dataKey="numRecords" name="Records" radius={[4, 4, 0, 0]}>
+                    {r.perSAResults[selectedSA].formA.confidenceDistribution.map((_, i) => {
+                      const fills = ["#DC2626", "#EA580C", "#D97706", "#16A34A"];
+                      return <Cell key={i} fill={fills[i] ?? "#16A34A"} />;
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <table className="w-full text-xs mt-3">
+                <thead><tr className="border-b">
+                  <th className="text-left pb-1">Confidence Range</th>
+                  <th className="text-right pb-1"># ECs</th>
+                  <th className="text-right pb-1"># Records</th>
+                  <th className="text-right pb-1">% Dataset</th>
+                  <th className="text-left pb-1 pl-2">Meaning</th>
+                </tr></thead>
+                <tbody>
+                  {r.perSAResults[selectedSA].formA.confidenceDistribution.map((row, i) => (
+                    <tr key={i} className="border-b border-muted">
+                      <td className="py-1 font-mono">{row.bucket}</td>
+                      <td className="py-1 text-right">{row.numECs}</td>
+                      <td className="py-1 text-right font-bold">{row.numRecords}</td>
+                      <td className="py-1 text-right">{row.pct}</td>
+                      <td className="py-1 pl-2 text-muted-foreground">{row.meaning}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* ── §8.6 Form A vs L-Diversity Cross-Check Table ────────────────────── */}
+      {crossCheckSA && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Form A vs L-Diversity Cross-Check Table</CardTitle>
+            <CardDescription className="text-xs">
+              🔴 HIDDEN RISK = L-Diversity PASSES but Form A confidence &gt; 70% — these are l-diversity blind spots.
+            </CardDescription>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {r.perSAResults.map((sa, i) => (
+                <Button key={sa.sa} size="sm" variant={selectedSA === i ? "default" : "outline"} className="text-xs h-7"
+                  onClick={() => setSelectedSA(i)}>{sa.sa}</Button>
+              ))}
+            </div>
+          </CardHeader>
           <CardContent>
-            <table className="w-full text-xs">
-              <thead><tr className="border-b"><th className="text-left pb-2">Attribute</th><th className="text-right pb-2">Attack Acc.</th><th className="text-right pb-2">Baseline</th><th className="text-right pb-2">Info Gain</th><th className="text-right pb-2">Risk Level</th></tr></thead>
-              <tbody>
-                {r.perSA.map((sa, i) => (
-                  <tr key={i} className="border-b border-muted">
-                    <td className="py-1.5 font-medium">{sa.sa}</td>
-                    <td className="py-1.5 text-right">{sa.attackAccuracy}%</td>
-                    <td className="py-1.5 text-right">{sa.baselineAccuracy}%</td>
-                    <td className="py-1.5 text-right font-bold" style={{ color: sa.infoGain > 10 ? "#DC2626" : "#16A34A" }}>+{sa.infoGain}%</td>
-                    <td className="py-1.5 text-right">{riskBadge(sa.riskLevel)}</td>
+            <ScrollArea className="h-[260px]">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left pb-1">QI Combination</th>
+                    <th className="text-right pb-1">EC Size</th>
+                    <th className="text-right pb-1">L-Div Distinct</th>
+                    <th className="text-right pb-1">L-Div Status</th>
+                    <th className="text-right pb-1">Form A Confidence</th>
+                    <th className="text-right pb-1">Flag</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {crossCheckSA.formA.ecBreakdown.map((ec, i) => (
+                    <tr key={i} className={`border-b border-muted ${ec.flag === "HIDDEN_RISK" ? "bg-red-50 dark:bg-red-950/20" : ""}`}>
+                      <td className="py-1 truncate max-w-[160px] text-muted-foreground" title={ec.qiCombo}>{ec.qiCombo.slice(0, 40)}</td>
+                      <td className="py-1 text-right">{ec.ecSize}</td>
+                      <td className="py-1 text-right">{ec.lDivDistinct}</td>
+                      <td className="py-1 text-right">
+                        {ec.lDivStatus === "PASS"
+                          ? <span className="text-green-600 font-medium">✅ PASS</span>
+                          : <span className="text-red-600 font-medium">❌ FAIL</span>
+                        }
+                      </td>
+                      <td className="py-1 text-right font-bold" style={{ color: inferenceFormAColor(ec.confidence) }}>
+                        {(ec.confidence * 100).toFixed(0)}%
+                      </td>
+                      <td className="py-1 text-right text-xs font-semibold">
+                        {ec.flag === "HIDDEN_RISK"    && <span className="text-red-600">🔴 HIDDEN RISK</span>}
+                        {ec.flag === "ALREADY_FLAGGED" && <span className="text-orange-600">⚠️ Already flagged</span>}
+                        {ec.flag === "SAFE"            && <span className="text-green-600">✅ Genuinely safe</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollArea>
           </CardContent>
         </Card>
-      </div>
+      )}
+
+      {/* ── §8.7 Form B Model Performance Table ─────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Form B — Global Predictive Inference Summary</CardTitle>
+          <CardDescription className="text-xs">Decision tree (max depth=4) vs naive baseline. Insufficient data = min class count &lt; 10.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left pb-2">Sensitive Attribute</th>
+                <th className="text-right pb-2">Baseline Acc.</th>
+                <th className="text-right pb-2">Attacker Acc.</th>
+                <th className="text-right pb-2">Inference Lift</th>
+                <th className="text-right pb-2">CV Method</th>
+                <th className="text-right pb-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.perSAResults.map((sa, i) => (
+                <tr key={i} className="border-b border-muted">
+                  <td className="py-2 font-medium">{sa.sa}</td>
+                  {sa.formB.status === "ok" ? (
+                    <>
+                      <td className="py-2 text-right">{sa.formB.baselineAccuracy}%</td>
+                      <td className="py-2 text-right">{sa.formB.attackerAccuracy}%</td>
+                      <td className="py-2 text-right font-bold" style={{ color: (sa.formB.inferenceLift ?? 0) > 10 ? "#DC2626" : "#16A34A" }}>
+                        {(sa.formB.inferenceLift ?? 0) >= 0 ? "+" : ""}{sa.formB.inferenceLift}pp
+                      </td>
+                      <td className="py-2 text-right text-muted-foreground">{sa.formB.cvMethod}</td>
+                      <td className="py-2 text-right">{inferenceLiftEmoji(sa.formB.liftStatus)} {sa.formB.liftStatus}</td>
+                    </>
+                  ) : (
+                    <td colSpan={5} className="py-2 text-amber-600 italic">⚠️ insufficient data</td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {/* ── §8.8 Inference Risk Summary — horizontal bars per SA ────────────── */}
+      {riskSummaryBars.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Inference Risk Summary — % Records in High-Risk Groups (Form A ≥ 70%)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {riskSummaryBars.map((item) => (
+              <div key={item.label}>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="font-medium">{item.label}</span>
+                  <span className="font-bold" style={{ color: inferenceFormAColor(item.pct / 100) }}>
+                    {inferenceFormAEmoji(item.status)} {item.pct.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="w-full bg-muted rounded-full h-3">
+                  <div
+                    className="h-3 rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(100, item.pct)}%`,
+                      backgroundColor: inferenceFormAColor(item.pct / 100),
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+            <div className="flex gap-4 text-xs text-muted-foreground mt-2">
+              <span><span className="inline-block w-3 h-3 rounded bg-red-600 mr-1" />≥ 70% 🔴 HIGH</span>
+              <span><span className="inline-block w-3 h-3 rounded bg-amber-500 mr-1" />40–70% 🟡 MEDIUM</span>
+              <span><span className="inline-block w-3 h-3 rounded bg-green-600 mr-1" />&lt; 40% 🟢 LOW</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── §8.9 Recommendations ────────────────────────────────────────────── */}
       <RecommendationsCard recs={r.recommendations} />
     </div>
   );
@@ -2297,7 +2672,7 @@ export default function RiskPage() {
     if (selectedAttacks.includes("journalist"))          steps.push({ id: "journalist",          label: "Journalist Attack (Population-Based Re-ID)...",        fn: () => { newResults.journalist          = runJournalistAttack(rawData, quasiIdentifiers, kThreshold[0], sensitiveAttributes, lThreshold[0], tVal, samplePct[0]); } });
     if (selectedAttacks.includes("marketer"))            steps.push({ id: "marketer",            label: "Marketer Attack (Bulk Commercial Re-ID)...",           fn: () => { newResults.marketer            = runMarketerAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0], tVal, kThreshold[0]); } });
     if (selectedAttacks.includes("singlingOut"))         steps.push({ id: "singlingOut",         label: "Singling Out Attack (GDPR Singling-Out Standard)...",   fn: () => { newResults.singlingOut         = runSingleOutAttack(rawData, allCols, kThreshold[0]); } });
-    if (selectedAttacks.includes("inference"))           steps.push({ id: "inference",           label: "Inference Attack (CART Decision Tree)...",              fn: () => { newResults.inference           = runInferenceAttack(rawData, quasiIdentifiers, sensitiveAttributes); } });
+    if (selectedAttacks.includes("inference"))           steps.push({ id: "inference",           label: "Inference Attack (Form A+B: EC Homogeneity & Predictive)...", fn: () => { newResults.inference           = runInferenceAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0]); } });
     if (selectedAttacks.includes("membership"))          steps.push({ id: "membership",          label: "Membership Attack (AUC Presence Detection)...",         fn: () => { newResults.membership          = runMembershipAttack(rawData, quasiIdentifiers); } });
     if (selectedAttacks.includes("recordLinkage"))       steps.push({ id: "recordLinkage",       label: "Record Linkage Attack (External Dataset Re-ID)...",          fn: () => { newResults.recordLinkage       = runRecordLinkageAttack(rawData, quasiIdentifiers); } });
     if (selectedAttacks.includes("attributeDisclosure")) steps.push({ id: "attributeDisclosure", label: "Attribute Disclosure Attack (Sensitive Inference)...",        fn: () => { newResults.attributeDisclosure = runAttributeDisclosureAttack(rawData, quasiIdentifiers, sensitiveAttributes); } });
