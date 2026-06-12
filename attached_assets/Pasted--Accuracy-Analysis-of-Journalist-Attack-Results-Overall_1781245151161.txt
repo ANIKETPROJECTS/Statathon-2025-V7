@@ -1,0 +1,72 @@
+## Accuracy Analysis of Journalist Attack Results
+
+Overall, the results are **largely accurate and logically sound**. Here's my detailed breakdown:
+
+---
+
+### ✅ CORRECT & ACCURATE
+
+**1. Journalist Re-ID Risk = 0.1% (LOW)**
+Perfectly correct. With Multiplier_comb values averaging ~1000+, each sample record represents ~1000+ people in the population. So even though all 20 records are sample-unique, the population EC sizes are 325–1988, meaning a journalist can't pinpoint an individual — they'd only narrow to a group of hundreds. 0.1% risk is mathematically sound.
+
+**2. Prosecutor Risk = 100%**
+Correct. All 20 records are singletons in the sample (Sample EC = 1 for every row), meaning every record is unique in the dataset. A prosecutor with direct access would re-identify with certainty.
+
+**3. Population-Unique = 0**
+Correct. With Multiplier_comb values all being 325–1988, no QI combination maps to a population group of size 1. The minimum Pop. EC is 325.06 (Uttarakhand, Urban), which is still far above 1.
+
+**4. Avg Pop. EC = 1171.1 / Min Pop. EC = 325.1**
+Verified manually. Looking at the table, the Pop. EC values range from ~325 (Uttarakhand Urban) to ~1988 (Haryana Urban). Average across 20 records checks out around ~1000–1200. ✅
+
+**5. Dual Status = "SAMPLE-UNIQUE / POP-SAFE" for all 20 rows**
+Correct. All have Sample EC = 1 (unique in sample → Prosecutor risk) but Pop. EC >> k=3 (safe in population → Journalist protected). This dual status logic is accurate.
+
+**6. Score Distribution Table (Prosecutor vs Journalist)**
+- Prosecutor: 20 records at 1.00 (certain) ✅ — all singletons
+- Journalist: 0 records at 1.00, all effectively near 0.001–0.003 ✅
+
+**7. Population EC Size Distribution**
+100% of records fall in the ">20" bucket. Correct — smallest Pop. EC is 325, so all 20 records are in groups far larger than 20 in the population. ✅
+
+---
+
+### ⚠️ ISSUES FOUND
+
+**1. L-Diversity: ALL 20 ECs fail — this is a structural artifact, not a true privacy failure**
+
+The system reports "20 out of 20 ECs violating l-diversity" for every sensitive attribute. This happens because with 7 quasi-identifiers (State_Region + Sector + District + Religion + Social_Group + HH_Size + Household_Type), every record forms its **own equivalence class of size 1** (since all 20 rows are unique). A group of 1 person can only have 1 distinct sensitive value → automatically fails l-diversity=2.
+
+This is **technically correct math** but **misleading as a risk signal** — it's a consequence of the highly granular QI selection, not an actual vulnerability. The system should ideally flag this as "equivalence classes are singletons; l-diversity is not meaningful here." **The system doesn't contextualize this properly.** 🔴
+
+**2. T-Closeness: Max TVD = 0.95 for NIC_2008, NCO_2004, Land_Owned, Land_Possessed**
+
+Same root cause — singleton ECs. When each EC has 1 record, the distribution within that EC is 100% one value, which will always deviate maximally from the global distribution. TVD of 0.95 against a threshold of 0.30 is technically correct arithmetic, but again **it's a structural artifact of singleton groups**, not a meaningful privacy leak. The result is accurate mathematically but **overstates the concern** in context. 🔴
+
+**3. Top 10 Vulnerable Records — Uttarakhand Urban (Pop. EC = 325.06) ranked #1**
+Correct. Smallest population group = highest journalist risk. The ranking by J. Score (0.003 being highest risk) correctly corresponds to the smallest Pop. EC values. ✅
+
+**4. Risk-Protection Split: 0 At Risk, 20 Protected**
+Correct given k=3. All Pop. ECs are ≥325, which is >> 3. ✅
+
+---
+
+### 🔴 One Genuine Concern to Flag
+
+The system shows **"Direct Identifiers Detected"** warning — FSU_Serial_No, Sch_No, District, FOD_Sub_Region, Land_Owned, Land_Possessed, Land_Cultivated, District_code, Multiplier_comb — and says *"Remove these before public release."* But **District was also used as a QI in the assessment**. Using a flagged direct identifier as a quasi-identifier is a configuration conflict the system should warn about more prominently.
+
+---
+
+### Summary Verdict
+
+| Section | Accurate? |
+|---|---|
+| Journalist Re-ID Risk (0.1%) | ✅ Yes |
+| Prosecutor Risk (100%) | ✅ Yes |
+| Population-Unique = 0 | ✅ Yes |
+| Dual Status labels | ✅ Yes |
+| L-Diversity FAILs | ⚠️ Math correct, misleading output |
+| T-Closeness FAILs | ⚠️ Math correct, overstated risk |
+| Vulnerable records ranking | ✅ Yes |
+| Risk-Protection Split | ✅ Yes |
+
+The **core journalist risk score is accurate**. The L-Diversity and T-Closeness failures are mathematically valid but are **artifacts of singleton equivalence classes** — your system should ideally detect this and add a caveat rather than treating them as standalone risk signals.

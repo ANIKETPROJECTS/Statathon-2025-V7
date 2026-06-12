@@ -373,6 +373,13 @@ function ProsecutorReport({ r, kThreshold }: { r: ProsecutorResult; kThreshold: 
         <Card>
           <CardHeader><CardTitle className="text-sm">L-Diversity Check (threshold l = {r.lDiversityResults[0] ? "see config" : "—"})</CardTitle></CardHeader>
           <CardContent className="space-y-3">
+            {/* Singleton-EC artifact caveat */}
+            {r.lDiversityResults[0] && r.lDiversityResults[0].totalEcs >= r.sampleN * 0.9 && (
+              <div className="p-3 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
+                <div className="font-bold mb-1">⚠️ STRUCTURAL ARTIFACT — L-Diversity failures are not an independent risk signal here</div>
+                All {r.lDiversityResults[0].totalEcs} equivalence classes are singletons (each record forms its own unique group due to the highly granular QI selection: {qis.join(", ")}). A group of 1 person can only contain 1 distinct SA value, so L-Diversity l≥2 failures are a mathematical inevitability — <strong>not evidence of a homogeneity attack</strong>. L-Diversity becomes meaningful only when ECs contain ≥ 2 records. To resolve: reduce the number or specificity of the selected quasi-identifiers.
+              </div>
+            )}
             {r.lDiversityResults.map((res, i) => (
               <div key={i} className={`p-3 rounded-lg border ${res.status === "FAIL" ? "border-red-300 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
                 <div className="flex items-center justify-between mb-1">
@@ -382,7 +389,7 @@ function ProsecutorReport({ r, kThreshold }: { r: ProsecutorResult; kThreshold: 
                 <div className="text-xs space-y-0.5 text-muted-foreground">
                   <div>Min distinct values in any EC: <strong>{res.minL}</strong></div>
                   <div>ECs violating l-diversity: <strong className={res.violatingEcs > 0 ? "text-red-600" : "text-green-600"}>{res.violatingEcs} out of {res.totalEcs}</strong> ({res.totalEcs > 0 ? ((res.violatingEcs/res.totalEcs)*100).toFixed(0) : 0}%)</div>
-                  {res.status === "FAIL" && <div className="italic mt-1">In some groups, all records share the same {res.sa} value. An attacker who identifies the group learns {res.sa} with certainty.</div>}
+                  {res.status === "FAIL" && res.totalEcs < r.sampleN * 0.9 && <div className="italic mt-1">In some groups, all records share the same {res.sa} value. An attacker who identifies the group learns {res.sa} with certainty.</div>}
                 </div>
               </div>
             ))}
@@ -395,6 +402,13 @@ function ProsecutorReport({ r, kThreshold }: { r: ProsecutorResult; kThreshold: 
         <Card>
           <CardHeader><CardTitle className="text-sm">T-Closeness Check (Total Variation Distance)</CardTitle></CardHeader>
           <CardContent className="space-y-3">
+            {/* Singleton-EC artifact caveat */}
+            {r.tClosenessResults[0] && r.tClosenessResults[0].totalEcs >= r.sampleN * 0.9 && (
+              <div className="p-3 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
+                <div className="font-bold mb-1">⚠️ STRUCTURAL ARTIFACT — T-Closeness high TVD is caused by singleton ECs, not targeted disclosure</div>
+                Singleton ECs always deviate maximally (TVD → 1.0) from the global SA distribution by construction: a single record is 100% one value, so the local distribution is always a point mass. The T-Closeness failures below are a direct consequence of the singleton EC structure — <strong>not evidence of attribute inference within groups</strong>. T-Closeness thresholds are designed for multi-record equivalence classes.
+              </div>
+            )}
             {r.tClosenessResults.map((res, i) => (
               <div key={i} className={`p-3 rounded-lg border ${res.status === "FAIL" ? "border-red-300 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
                 <div className="flex items-center justify-between mb-1">
@@ -404,7 +418,7 @@ function ProsecutorReport({ r, kThreshold }: { r: ProsecutorResult; kThreshold: 
                 <div className="text-xs space-y-0.5 text-muted-foreground">
                   <div>Maximum EC deviation from global distribution: <strong className={res.maxDistance > 0.3 ? "text-red-600" : "text-green-600"}>{res.maxDistance}</strong></div>
                   <div>ECs violating t-closeness: <strong className={res.violatingEcs > 0 ? "text-red-600" : "text-green-600"}>{res.violatingEcs} out of {res.totalEcs}</strong></div>
-                  {res.status === "FAIL" && <div className="italic mt-1">The distribution of {res.sa} inside individual groups is very different from the overall dataset. This reveals information even without direct re-identification.</div>}
+                  {res.status === "FAIL" && res.totalEcs < r.sampleN * 0.9 && <div className="italic mt-1">The distribution of {res.sa} inside individual groups is very different from the overall dataset. This reveals information even without direct re-identification.</div>}
                 </div>
               </div>
             ))}
@@ -752,6 +766,13 @@ function JournalistReport({ r, kThreshold }: { r: JournalistResult; kThreshold: 
         <Card>
           <CardHeader><CardTitle className="text-sm">L-Diversity Check (sample-based — independent of attacker model)</CardTitle></CardHeader>
           <CardContent className="space-y-3">
+            {/* Singleton-EC artifact caveat */}
+            {r.lDiversityResults[0] && r.lDiversityResults[0].totalEcs >= r.sampleN * 0.9 && (
+              <div className="p-3 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
+                <div className="font-bold mb-1">⚠️ STRUCTURAL ARTIFACT — L-Diversity failures are not an independent risk signal here</div>
+                All {r.lDiversityResults[0].totalEcs} sample equivalence classes are singletons (each record is unique in the sample under the selected QIs). A group of 1 person can only contain 1 distinct SA value, so L-Diversity l≥2 failures are a mathematical inevitability — <strong>not evidence of a homogeneity attack</strong>. The core journalist risk score above already accounts for this; these failures should not be treated as additional privacy violations. To make L-Diversity meaningful: reduce QI granularity so that groups of ≥ 2 records form.
+              </div>
+            )}
             {r.lDiversityResults.map((res, i) => (
               <div key={i} className={`p-3 rounded-lg border ${res.status === "FAIL" ? "border-red-300 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
                 <div className="flex items-center justify-between mb-1">
@@ -761,7 +782,7 @@ function JournalistReport({ r, kThreshold }: { r: JournalistResult; kThreshold: 
                 <div className="text-xs space-y-0.5 text-muted-foreground">
                   <div>Min distinct values in any EC: <strong>{res.minL}</strong></div>
                   <div>ECs violating l-diversity: <strong className={res.violatingEcs > 0 ? "text-red-600" : "text-green-600"}>{res.violatingEcs} out of {res.totalEcs}</strong> ({res.totalEcs > 0 ? ((res.violatingEcs/res.totalEcs)*100).toFixed(0) : 0}%)</div>
-                  {res.status === "FAIL" && <div className="italic mt-1">In some groups, all records share the same {res.sa} value — an attacker who links to the group learns {res.sa} with certainty, regardless of journalist/prosecutor model.</div>}
+                  {res.status === "FAIL" && res.totalEcs < r.sampleN * 0.9 && <div className="italic mt-1">In some groups, all records share the same {res.sa} value — an attacker who links to the group learns {res.sa} with certainty, regardless of journalist/prosecutor model.</div>}
                 </div>
               </div>
             ))}
@@ -774,6 +795,13 @@ function JournalistReport({ r, kThreshold }: { r: JournalistResult; kThreshold: 
         <Card>
           <CardHeader><CardTitle className="text-sm">T-Closeness Check (Total Variation Distance — sample-based)</CardTitle></CardHeader>
           <CardContent className="space-y-3">
+            {/* Singleton-EC artifact caveat */}
+            {r.tClosenessResults[0] && r.tClosenessResults[0].totalEcs >= r.sampleN * 0.9 && (
+              <div className="p-3 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
+                <div className="font-bold mb-1">⚠️ STRUCTURAL ARTIFACT — High TVD is caused by singleton ECs, not targeted attribute disclosure</div>
+                Singleton ECs always deviate maximally from the global SA distribution (TVD → 1.0): a single record is 100% one SA value, so the local distribution is always a point mass. The T-Closeness violations shown below are a direct consequence of the same singleton EC structure identified above — <strong>not evidence of distributional skew within real groups</strong>. T-Closeness thresholds are designed for multi-record equivalence classes.
+              </div>
+            )}
             {r.tClosenessResults.map((res, i) => (
               <div key={i} className={`p-3 rounded-lg border ${res.status === "FAIL" ? "border-red-300 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
                 <div className="flex items-center justify-between mb-1">
@@ -783,7 +811,7 @@ function JournalistReport({ r, kThreshold }: { r: JournalistResult; kThreshold: 
                 <div className="text-xs space-y-0.5 text-muted-foreground">
                   <div>Maximum EC deviation from global distribution: <strong className={res.maxDistance > 0.3 ? "text-red-600" : "text-green-600"}>{res.maxDistance}</strong></div>
                   <div>ECs violating t-closeness: <strong className={res.violatingEcs > 0 ? "text-red-600" : "text-green-600"}>{res.violatingEcs} out of {res.totalEcs}</strong></div>
-                  {res.status === "FAIL" && <div className="italic mt-1">The distribution of {res.sa} inside some groups differs significantly from the overall dataset distribution.</div>}
+                  {res.status === "FAIL" && res.totalEcs < r.sampleN * 0.9 && <div className="italic mt-1">The distribution of {res.sa} inside some groups differs significantly from the overall dataset distribution.</div>}
                 </div>
               </div>
             ))}
@@ -1337,6 +1365,13 @@ function MarketerReport({ r }: { r: MarketerResult }) {
                 <div className="text-xs text-muted-foreground py-4">No sensitive attributes selected.</div>
               ) : (
                 <div className="space-y-3">
+                  {/* Singleton-EC artifact caveat */}
+                  {r.lDiversityResults[0] && r.lDiversityResults[0].totalEcs >= r.sampleN * 0.9 && (
+                    <div className="p-3 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
+                      <div className="font-bold mb-1">⚠️ STRUCTURAL ARTIFACT — L-Diversity failures are not an independent risk signal here</div>
+                      All {r.lDiversityResults[0].totalEcs} equivalence classes are singletons. A group of 1 record can only contain 1 distinct SA value — L-Diversity l≥2 failures are mathematically inevitable here, <strong>not evidence of homogeneity</strong>. Reduce QI granularity to create multi-record ECs for a meaningful L-Diversity assessment.
+                    </div>
+                  )}
                   {r.lDiversityResults.map((ld) => (
                     <div key={ld.sa} className="p-3 rounded border">
                       <div className="flex justify-between items-center mb-2">
@@ -1350,7 +1385,7 @@ function MarketerReport({ r }: { r: MarketerResult }) {
                         <div><div className="text-muted-foreground">Violating ECs</div><div className="font-bold text-red-600">{ld.violatingEcs}/{ld.totalEcs}</div></div>
                         <div><div className="text-muted-foreground">Records in viol. ECs</div><div className="font-bold">{ld.violatingRecordPct}%</div></div>
                       </div>
-                      {ld.status === "FAIL" && (
+                      {ld.status === "FAIL" && ld.totalEcs < r.sampleN * 0.9 && (
                         <div className="mt-2 text-xs text-muted-foreground">
                           In {ld.violatingEcs} EC{ld.violatingEcs > 1 ? "s" : ""}, all records share the same <strong>{ld.sa}</strong> value.
                           A data broker who links any record from such a group learns <strong>{ld.sa}</strong> for the ENTIRE group — bulk attribute disclosure.
@@ -1374,6 +1409,13 @@ function MarketerReport({ r }: { r: MarketerResult }) {
                 <div className="text-xs text-muted-foreground py-4">No sensitive attributes selected.</div>
               ) : (
                 <div className="space-y-3">
+                  {/* Singleton-EC artifact caveat */}
+                  {r.tClosenessResults[0] && r.tClosenessResults[0].totalEcs >= r.sampleN * 0.9 && (
+                    <div className="p-3 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
+                      <div className="font-bold mb-1">⚠️ STRUCTURAL ARTIFACT — High TVD caused by singleton ECs, not distributional skew within groups</div>
+                      A single-record EC is always 100% one SA value → TVD against the global distribution is always near 1.0. These T-Closeness violations are a structural inevitability of singleton groups, <strong>not evidence that a data broker can exploit distributional skew</strong>.
+                    </div>
+                  )}
                   {r.tClosenessResults.map((tc) => (
                     <div key={tc.sa} className="p-3 rounded border">
                       <div className="flex justify-between items-center mb-2">
@@ -1386,7 +1428,7 @@ function MarketerReport({ r }: { r: MarketerResult }) {
                         <div><div className="text-muted-foreground">Max EC deviation (TVD)</div><div className="font-bold">{tc.maxDistance}</div></div>
                         <div><div className="text-muted-foreground">Violating ECs</div><div className="font-bold text-red-600">{tc.violatingEcs}/{tc.totalEcs}</div></div>
                       </div>
-                      {tc.status === "FAIL" && (
+                      {tc.status === "FAIL" && tc.totalEcs < r.sampleN * 0.9 && (
                         <div className="mt-2 text-xs text-muted-foreground">
                           The distribution of <strong>{tc.sa}</strong> inside individual QI groups is very different from its distribution in the overall dataset.
                           A data broker can use this skew to infer <strong>{tc.sa}</strong> with higher accuracy than guessing from the global average.
@@ -2756,6 +2798,30 @@ export default function RiskPage() {
                       <p className="text-[10px] text-orange-500 dark:text-orange-400">Remove these before public release.</p>
                     </div>
                   )}
+
+                  {/* QI × Direct Identifier conflict warning */}
+                  {autoAssist && (() => {
+                    const conflicts = quasiIdentifiers.filter((qi) =>
+                      autoAssist.columnGroups.directIdentifiers.includes(qi)
+                    );
+                    if (conflicts.length === 0) return null;
+                    return (
+                      <div className="rounded-md border-2 border-red-500 bg-red-50 dark:bg-red-950/40 p-2 space-y-1">
+                        <p className="text-xs font-bold text-red-700 dark:text-red-400 flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" /> ⚠️ CONFIGURATION CONFLICT
+                        </p>
+                        <p className="text-xs text-red-600 dark:text-red-300">
+                          The following column{conflicts.length > 1 ? "s are" : " is"} flagged as a Direct Identifier AND selected as a Quasi-Identifier. Using a direct identifier as a QI in a privacy assessment is a configuration error — it inflates singularity and makes L-Diversity / T-Closeness results misleading:
+                        </p>
+                        {conflicts.map((col) => (
+                          <p key={col} className="text-xs font-bold text-red-700 dark:text-red-400 pl-1">🔴 {col}</p>
+                        ))}
+                        <p className="text-[10px] text-red-500 dark:text-red-400">
+                          Action: Remove {conflicts.length > 1 ? "these columns" : "this column"} from the QI list, OR suppress {conflicts.length > 1 ? "them" : "it"} from the dataset before running the assessment.
+                        </p>
+                      </div>
+                    );
+                  })()}
 
                   {/* QI columns */}
                   <div className="space-y-1.5">
