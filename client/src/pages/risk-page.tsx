@@ -8,12 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   AlertTriangle, Shield, Users, Fingerprint, BarChart3, Play, Loader2,
   CheckCircle, XCircle, Target, Eye, Brain, UserCheck, Network, Info,
+  Download, ChevronLeft, ChevronRight, Filter,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { Dataset } from "@shared/schema";
@@ -109,73 +111,347 @@ const CHART_TOOLTIP = {
 
 // ─── Attack Report Components ─────────────────────────────────────────────────
 
-function ProsecutorReport({ r }: { r: ProsecutorResult }) {
+const EC_BUCKET_COLORS = ["#DC2626", "#EA580C", "#D97706", "#16A34A", "#16A34A"];
+
+function statusLabel(atRisk: boolean, linkScore: number, kThreshold: number, ecSize: number) {
+  if (linkScore === 1.0) return { label: "🔴 UNIQUELY IDENTIFIABLE", cls: "text-red-600 font-bold" };
+  if (ecSize < kThreshold) return { label: "🟡 LOW PROTECTION", cls: "text-amber-600 font-semibold" };
+  return { label: "🟢 PROTECTED", cls: "text-green-600" };
+}
+
+function downloadRecordCSV(r: ProsecutorResult) {
+  const qis = r.quasiIdentifiers;
+  const header = ["Row#", ...qis, "EC_Size", "Link_Score", "Status"].join(",");
+  const rows = r.recordTable.map((row) => {
+    const st = row.linkScore === 1.0 ? "UNIQUELY_IDENTIFIABLE" : row.atRisk ? "LOW_PROTECTION" : "PROTECTED";
+    return [row.rowIdx, ...qis.map((qi) => `"${row.qiValues[qi] ?? ""}"`), row.ecSize, row.linkScore, st].join(",");
+  });
+  const csv = [header, ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "prosecutor_attack_record_level.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const PAGE_SIZE = 50;
+
+function ProsecutorReport({ r, kThreshold }: { r: ProsecutorResult; kThreshold: number }) {
+  const [filterMode, setFilterMode] = useState<"all" | "atRisk" | "protected">("all");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+
+  const qis = r.quasiIdentifiers;
+
+  const filtered = r.recordTable.filter((row) => {
+    if (filterMode === "atRisk" && !row.atRisk) return false;
+    if (filterMode === "protected" && row.atRisk) return false;
+    if (search) {
+      const haystack = qis.map((qi) => row.qiValues[qi] ?? "").join(" ").toLowerCase();
+      if (!haystack.includes(search.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const riskColor = r.reIdRisk > 0.2 ? "text-red-600" : r.reIdRisk > 0.05 ? "text-amber-600" : "text-green-600";
+  const riskLabel = r.reIdRisk > 0.2 ? "HIGH" : r.reIdRisk > 0.05 ? "MEDIUM" : "LOW";
+
+  const topRecord = r.topVulnerableRecord;
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCard("Re-ID Risk", `${(r.riskScore * 100).toFixed(1)}%`, "Avg linkage score", <Target className="h-4 w-4" />, "text-red-600")}
-        {kpiCard("Unique Records", r.uniqueRecordsCount, "Singleton ECs (k=1)", <Fingerprint className="h-4 w-4" />, "text-orange-600")}
-        {kpiCard("Avg EC Size", r.avgEcSize.toFixed(1), "Mean equivalence class size", <Users className="h-4 w-4" />)}
-        {kpiCard("Min-K", r.minK, "Smallest equivalence class", <AlertTriangle className="h-4 w-4" />, r.minK === 1 ? "text-red-600" : "text-green-600")}
+
+      {/* ── §4.1 Attack Summary Banner ─────────────────────────────────────── */}
+      <div className={`rounded-lg border-2 p-4 ${r.reIdRisk > 0.2 ? "border-red-400 bg-red-50 dark:bg-red-950/20" : r.reIdRisk > 0.05 ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20" : "border-green-400 bg-green-50 dark:bg-green-950/20"}`}>
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-bold text-sm uppercase tracking-wider">🎯 Prosecutor Attack Results</span>
+          <span className={`text-xs font-bold px-2 py-1 rounded border ${r.reIdRisk > 0.2 ? "bg-red-100 text-red-700 border-red-300" : r.reIdRisk > 0.05 ? "bg-amber-100 text-amber-700 border-amber-300" : "bg-green-100 text-green-700 border-green-300"}`}>
+            RISK LEVEL: {riskLabel}
+          </span>
+        </div>
+        <div className="text-xs text-muted-foreground mb-3">
+          Rows analysed: <strong>{r.sampleN}</strong> &nbsp;|&nbsp; QIs used: <strong>{qis.join(", ") || "—"}</strong>
+        </div>
+        <p className="text-sm leading-relaxed">
+          An attacker who already knows a person is in this dataset can correctly identify{" "}
+          <strong className={riskColor}>{(r.reIdRisk * 100).toFixed(1)}%</strong> of individuals using only{" "}
+          <em>{qis.slice(0, 3).join(", ")}{qis.length > 3 ? `, +${qis.length - 3} more` : ""}</em>.{" "}
+          Out of <strong>{r.sampleN}</strong> records,{" "}
+          <strong className="text-red-600">{r.uniqueRecordsCount}</strong>{" "}
+          {r.uniqueRecordsCount === 1 ? "person is" : "people are"} completely unique —{" "}
+          {r.uniqueRecordsCount === 0
+            ? "no singleton records found."
+            : `${r.uniqueRecordsCount === 1 ? "they can" : "they can each"} be pinpointed with 100% certainty.`}
+        </p>
       </div>
+
+      {/* ── §4.2 Key Metrics Row ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {kpiCard("Re-ID Risk", `${(r.reIdRisk * 100).toFixed(1)}%`, "Avg chance attacker correctly IDs a person", <Target className="h-4 w-4" />, r.reIdRisk > 0.2 ? "text-red-600" : r.reIdRisk > 0.05 ? "text-amber-600" : "text-green-600")}
+        {kpiCard("Unique Records", r.uniqueRecordsCount, "Singletons — 100% identifiable (k=1)", <Fingerprint className="h-4 w-4" />, r.uniqueRecordsCount > 0 ? "text-red-600" : "text-green-600")}
+        {kpiCard("Avg EC Size", r.avgEcSize.toFixed(1), "Mean group size sharing same QI values", <Users className="h-4 w-4" />, r.avgEcSize < kThreshold ? "text-red-600" : "text-green-600")}
+        {kpiCard("Min-K", r.minK, "Smallest group — worst-case exposure", <AlertTriangle className="h-4 w-4" />, r.minK < kThreshold ? "text-red-600" : "text-green-600")}
+      </div>
+
+      {/* ── §4.3 Record-Level Attack Trace Table ─────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className="text-sm">Record-Level Attack Trace ({filtered.length} records)</CardTitle>
+            <Button size="sm" variant="outline" onClick={() => downloadRecordCSV(r)} className="h-7 text-xs gap-1">
+              <Download className="h-3 w-3" /> Download CSV
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <div className="flex gap-1">
+              {(["all", "atRisk", "protected"] as const).map((m) => (
+                <button key={m} onClick={() => { setFilterMode(m); setPage(1); }}
+                  className={`px-2 py-1 text-xs rounded border transition-colors ${filterMode === m ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}>
+                  {m === "all" ? "Show All" : m === "atRisk" ? "🔴 At Risk Only" : "🟢 Protected Only"}
+                </button>
+              ))}
+            </div>
+            <div className="relative flex-1 min-w-[140px]">
+              <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <Input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                placeholder="Search QI values..." className="h-7 text-xs pl-6" />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b bg-muted/40">
+                  <th className="text-left px-3 py-2">Row #</th>
+                  {qis.map((qi) => <th key={qi} className="text-left px-2 py-2 truncate max-w-[100px]" title={qi}>{qi.length > 12 ? qi.slice(0, 12) + "…" : qi}</th>)}
+                  <th className="text-right px-3 py-2">Group Size</th>
+                  <th className="text-right px-3 py-2">Link Score</th>
+                  <th className="text-left px-3 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.length === 0 ? (
+                  <tr><td colSpan={qis.length + 4} className="text-center py-8 text-muted-foreground">No records match the current filter.</td></tr>
+                ) : pageRows.map((row) => {
+                  const { label, cls } = statusLabel(row.atRisk, row.linkScore, kThreshold, row.ecSize);
+                  return (
+                    <tr key={row.rowIdx} className="border-b border-muted hover:bg-muted/20">
+                      <td className="px-3 py-1.5 text-muted-foreground">{row.rowIdx}</td>
+                      {qis.map((qi) => <td key={qi} className="px-2 py-1.5 truncate max-w-[100px]" title={row.qiValues[qi]}>{row.qiValues[qi] ?? ""}</td>)}
+                      <td className="px-3 py-1.5 text-right font-medium">{row.ecSize}</td>
+                      <td className={`px-3 py-1.5 text-right font-bold ${row.linkScore >= 0.5 ? "text-red-600" : row.linkScore >= 0.2 ? "text-amber-600" : "text-green-600"}`}>{row.linkScore.toFixed(2)}</td>
+                      <td className={`px-3 py-1.5 text-xs ${cls}`}>{label}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-3 py-2 border-t text-xs text-muted-foreground">
+              <span>Page {safePage} of {totalPages} ({filtered.length} records)</span>
+              <div className="flex gap-1">
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={safePage === 1} onClick={() => setPage(safePage - 1)}><ChevronLeft className="h-3 w-3" /></Button>
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={safePage === totalPages} onClick={() => setPage(safePage + 1)}><ChevronRight className="h-3 w-3" /></Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── §4.4 Attack Narrative ─────────────────────────────────────────────── */}
+      {topRecord && (
+        <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-800">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-orange-800 dark:text-orange-200">🔍 Attack Simulation — How the Attack Works on YOUR Data</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs font-mono space-y-2 text-orange-900 dark:text-orange-100">
+            <div><strong>Step 1 — Attacker's Knowledge</strong><br />
+              The attacker knows a specific person is in this dataset. From a public record they know:<br />
+              {qis.map((qi) => <span key={qi} className="block ml-4">{qi} = {topRecord.qiValues[qi]}</span>)}
+            </div>
+            <div><strong>Step 2 — Database Query</strong><br />
+              Attacker queries: "Show me all records where {qis.map((qi, i) => `${qi}=${topRecord.qiValues[qi]}`).join(" AND ")}"<br />
+              <span className="ml-4">Result: <strong>{topRecord.ecSize} record{topRecord.ecSize > 1 ? "s" : ""} found.</strong> (Row #{topRecord.rowIdx})</span>
+            </div>
+            <div><strong>Step 3 — Re-identification</strong><br />
+              {topRecord.ecSize === 1
+                ? <span>Since only 1 record matches, the attacker has identified this person with <strong className="text-red-600">100% certainty</strong>. They now know all sensitive attributes for this individual.</span>
+                : <span>With {topRecord.ecSize} records matching, the attacker has a <strong>{(topRecord.linkScore * 100).toFixed(0)}%</strong> chance of correctly identifying this person.</span>}
+            </div>
+            <div><strong>Step 4 — Scale</strong><br />
+              This attack was possible (link score ≥ 0.5) on <strong>{r.recordTable.filter((x) => x.linkScore >= 0.5).length}</strong> out of <strong>{r.sampleN}</strong> records.<br />
+              <strong>{(r.uniqueRecordsCount / r.sampleN * 100).toFixed(1)}%</strong> of your dataset is fully re-identifiable (singleton records).
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── §4.5 Equivalence Class Distribution ──────────────────────────────── */}
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
-          <CardHeader><CardTitle className="text-sm">Equivalence Class Distribution</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">EC Size Distribution (Chart)</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={r.histogram}>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={r.histogram} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="label" tick={{ fontSize: 10 }} width={75} />
                 <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="count" fill="#2563EB" radius={[4, 4, 0, 0]} name="Records" />
+                <Bar dataKey="count" radius={[0, 4, 4, 0]} name="Records">
+                  {r.histogram.map((_, i) => <Cell key={i} fill={EC_BUCKET_COLORS[i] ?? "#16A34A"} />)}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle className="text-sm">Link Score Distribution</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">EC Size Distribution (Table)</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
+            <table className="w-full text-xs">
+              <thead><tr className="border-b"><th className="text-left pb-2">EC Size</th><th className="text-right pb-2"># ECs</th><th className="text-right pb-2"># Records</th><th className="text-right pb-2">% Dataset</th></tr></thead>
+              <tbody>
+                {r.ecSizeTable.map((row, i) => (
+                  <tr key={i} className="border-b border-muted">
+                    <td className="py-1.5 font-medium" style={{ color: EC_BUCKET_COLORS[i] }}>{row.label}</td>
+                    <td className="py-1.5 text-right">{row.numECs}</td>
+                    <td className="py-1.5 text-right">{row.numRecords}</td>
+                    <td className="py-1.5 text-right font-bold" style={{ color: EC_BUCKET_COLORS[i] }}>{row.pct}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── §4.6 Link Score Distribution ─────────────────────────────────────── */}
+      <Card>
+        <CardHeader><CardTitle className="text-sm">Link Score Distribution — Attacker Certainty by Record</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-2 gap-6">
+            <ResponsiveContainer width="100%" height={180}>
               <BarChart data={r.linkScoreDistribution}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
+                <XAxis dataKey="bucket" tick={{ fontSize: 9 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="count" fill="#DC2626" radius={[4, 4, 0, 0]} name="Records" />
+                <Bar dataKey="count" name="Records" radius={[4, 4, 0, 0]}>
+                  {r.linkScoreDistribution.map((_, i) => <Cell key={i} fill={["#DC2626","#EA580C","#D97706","#16A34A","#16A34A"][i] ?? "#16A34A"} />)}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
+            <table className="text-xs self-start">
+              <thead><tr className="border-b"><th className="text-left pb-2">Score Range</th><th className="text-right pb-2"># Records</th><th className="text-left pb-2 pl-3">Meaning</th></tr></thead>
+              <tbody>
+                {r.linkScoreDistribution.map((row, i) => {
+                  const meanings = ["Attacker is 100% certain","More likely correct than not","Coin-flip or worse for attacker","Attacker has <25% chance","Effectively anonymous"];
+                  return (
+                    <tr key={i} className="border-b border-muted">
+                      <td className="py-1.5 font-medium" style={{ color: ["#DC2626","#EA580C","#D97706","#16A34A","#16A34A"][i] }}>{row.bucket}</td>
+                      <td className="py-1.5 text-right font-bold">{row.count}</td>
+                      <td className="py-1.5 pl-3 text-muted-foreground">{meanings[i]}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── §4.7 L-Diversity Results ──────────────────────────────────────────── */}
+      {r.lDiversityResults.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm">L-Diversity Check (threshold l = {r.lDiversityResults[0] ? "see config" : "—"})</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {r.lDiversityResults.map((res, i) => (
+              <div key={i} className={`p-3 rounded-lg border ${res.status === "FAIL" ? "border-red-300 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-semibold text-sm">Sensitive Attribute: <code>{res.sa}</code></span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${res.status === "FAIL" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>{res.status === "FAIL" ? "🔴 FAIL" : "🟢 PASS"}</span>
+                </div>
+                <div className="text-xs space-y-0.5 text-muted-foreground">
+                  <div>Min distinct values in any EC: <strong>{res.minL}</strong></div>
+                  <div>ECs violating l-diversity: <strong className={res.violatingEcs > 0 ? "text-red-600" : "text-green-600"}>{res.violatingEcs} out of {res.totalEcs}</strong> ({res.totalEcs > 0 ? ((res.violatingEcs/res.totalEcs)*100).toFixed(0) : 0}%)</div>
+                  {res.status === "FAIL" && <div className="italic mt-1">In some groups, all records share the same {res.sa} value. An attacker who identifies the group learns {res.sa} with certainty.</div>}
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
+      )}
+
+      {/* ── §4.8 T-Closeness Results ──────────────────────────────────────────── */}
+      {r.tClosenessResults.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-sm">Risk–Protection Donut</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">T-Closeness Check (Total Variation Distance)</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {r.tClosenessResults.map((res, i) => (
+              <div key={i} className={`p-3 rounded-lg border ${res.status === "FAIL" ? "border-red-300 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-semibold text-sm">Sensitive Attribute: <code>{res.sa}</code></span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${res.status === "FAIL" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>{res.status === "FAIL" ? "🔴 FAIL" : "🟢 PASS"}</span>
+                </div>
+                <div className="text-xs space-y-0.5 text-muted-foreground">
+                  <div>Maximum EC deviation from global distribution: <strong className={res.maxDistance > 0.3 ? "text-red-600" : "text-green-600"}>{res.maxDistance}</strong></div>
+                  <div>ECs violating t-closeness: <strong className={res.violatingEcs > 0 ? "text-red-600" : "text-green-600"}>{res.violatingEcs} out of {res.totalEcs}</strong></div>
+                  {res.status === "FAIL" && <div className="italic mt-1">The distribution of {res.sa} inside individual groups is very different from the overall dataset. This reveals information even without direct re-identification.</div>}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── §4.9 Risk-Protection Donut (real counts) ─────────────────────────── */}
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Risk–Protection Split (Real Record Counts)</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie data={[
-                  { name: "At Risk", value: parseFloat((r.riskScore * 100).toFixed(1)) },
-                  { name: "Protected", value: parseFloat(((1 - r.riskScore) * 100).toFixed(1)) },
+                  { name: `At Risk (${r.atRiskCount})`, value: r.atRiskCount },
+                  { name: `Protected (${r.protectedCount})`, value: r.protectedCount },
                 ]} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={2} dataKey="value">
                   <Cell fill="#DC2626" />
                   <Cell fill="#16A34A" />
                 </Pie>
-                <Tooltip {...CHART_TOOLTIP} />
+                <Tooltip {...CHART_TOOLTIP} formatter={(v: number) => `${v} records`} />
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
+            <div className="text-center text-xs text-muted-foreground mt-2">
+              At Risk: {r.atRiskCount} records ({r.sampleN > 0 ? ((r.atRiskCount/r.sampleN)*100).toFixed(1) : 0}%) — EC size &lt; k={kThreshold}<br/>
+              Protected: {r.protectedCount} records ({r.sampleN > 0 ? ((r.protectedCount/r.sampleN)*100).toFixed(1) : 0}%) — EC size ≥ k
+            </div>
           </CardContent>
         </Card>
+
+        {/* ── §4.10 Top 10 Vulnerable Records ─────────────────────────────────── */}
         <Card>
-          <CardHeader><CardTitle className="text-sm">Top Vulnerable Records</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-sm">Top 10 Vulnerable Records (Highest Risk)</CardTitle>
+            <CardDescription className="text-xs">These rows should be suppressed or generalized before releasing this dataset.</CardDescription>
+          </CardHeader>
           <CardContent>
             <ScrollArea className="h-[200px]">
               <table className="w-full text-xs">
-                <thead><tr className="border-b"><th className="text-left pb-1">QI Combination</th><th className="text-right pb-1">Link Score</th><th className="text-right pb-1">EC Size</th></tr></thead>
+                <thead><tr className="border-b"><th className="text-left pb-1">Rank</th><th className="text-left pb-1">QI Combination</th><th className="text-right pb-1">Link Score</th><th className="text-right pb-1">EC Size</th></tr></thead>
                 <tbody>
                   {r.topVulnerable.map((row, i) => (
                     <tr key={i} className="border-b border-muted">
-                      <td className="py-1 pr-2 text-muted-foreground truncate max-w-[200px]">{row.qiCombo}</td>
-                      <td className="py-1 text-right font-bold text-red-600">{row.linkScore}</td>
+                      <td className="py-1 pr-2 text-muted-foreground">{i + 1}</td>
+                      <td className="py-1 pr-2 text-muted-foreground truncate max-w-[160px]" title={row.qiCombo}>{row.qiCombo.slice(0, 40)}{row.qiCombo.length > 40 ? "…" : ""}</td>
+                      <td className="py-1 text-right font-bold text-red-600">{row.linkScore.toFixed(2)}</td>
                       <td className="py-1 text-right">{row.ecSize}</td>
                     </tr>
                   ))}
@@ -185,6 +461,7 @@ function ProsecutorReport({ r }: { r: ProsecutorResult }) {
           </CardContent>
         </Card>
       </div>
+
       <RecommendationsCard recs={r.recommendations} />
     </div>
   );
@@ -1119,7 +1396,7 @@ export default function RiskPage() {
 
     const steps: { id: string; label: string; fn: () => void }[] = [];
 
-    if (selectedAttacks.includes("prosecutor"))          steps.push({ id: "prosecutor",          label: "Prosecutor Attack (Within-Dataset Re-ID)...",         fn: () => { newResults.prosecutor          = runProsecutorAttack(rawData, quasiIdentifiers, kThreshold[0]); } });
+    if (selectedAttacks.includes("prosecutor"))          steps.push({ id: "prosecutor",          label: "Prosecutor Attack (Within-Dataset Re-ID)...",         fn: () => { newResults.prosecutor          = runProsecutorAttack(rawData, quasiIdentifiers, kThreshold[0], sensitiveAttributes, lThreshold[0], tVal); } });
     if (selectedAttacks.includes("journalist"))          steps.push({ id: "journalist",          label: "Journalist Attack (Probabilistic Re-ID)...",           fn: () => { newResults.journalist          = runJournalistAttack(rawData, quasiIdentifiers, kThreshold[0]); } });
     if (selectedAttacks.includes("marketer"))            steps.push({ id: "marketer",            label: "Marketer Attack (L-Diversity & T-Closeness)...",       fn: () => { newResults.marketer            = runMarketerAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0], tVal); } });
     if (selectedAttacks.includes("singlingOut"))         steps.push({ id: "singlingOut",         label: "Singling Out Attack (GDPR Singling-Out Standard)...",   fn: () => { newResults.singlingOut         = runSingleOutAttack(rawData, allCols, kThreshold[0]); } });
@@ -1329,7 +1606,7 @@ export default function RiskPage() {
                   </Card>
                   {results[a.id] ? (
                     <>
-                      {a.id === "prosecutor"          && <ProsecutorReport r={results.prosecutor!} />}
+                      {a.id === "prosecutor"          && <ProsecutorReport r={results.prosecutor!} kThreshold={kThreshold[0]} />}
                       {a.id === "journalist"          && <JournalistReport r={results.journalist!} />}
                       {a.id === "marketer"            && <MarketerReport r={results.marketer!} />}
                       {a.id === "singlingOut"         && <SinglingOutReport r={results.singlingOut!} />}
