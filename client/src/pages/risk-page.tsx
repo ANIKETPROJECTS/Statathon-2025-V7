@@ -4443,94 +4443,422 @@ Reconstruction:
   );
 }
 
-function ModelInversionReport({ r }: { r: ModelInversionResult }) {
+function MIProtectionRow({
+  label, param, stat, configuredVal,
+}: {
+  label: string; param: string; stat: ModelInversionResult["kAnalysis"]; configuredVal: number;
+}) {
+  const passPct = parseFloat((((stat.satisfying) / Math.max(stat.total, 1)) * 100).toFixed(1));
+  const ok = stat.violating === 0;
+  return (
+    <div className={`rounded-lg border p-3 space-y-1.5 ${ok ? "border-green-300 bg-green-50 dark:bg-green-950/20" : stat.violatingPct > 10 ? "border-red-300 bg-red-50 dark:bg-red-950/20" : "border-amber-300 bg-amber-50 dark:bg-amber-950/20"}`}>
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold">{label} ({param}={configuredVal})</span>
+        <span className="text-lg">{ok ? "✅" : stat.violatingPct > 10 ? "❌" : "⚠️"}</span>
+      </div>
+      <div className="text-xs text-muted-foreground">
+        <span className="font-medium text-green-700 dark:text-green-400">{passPct}% of classes satisfy {param}≥{configuredVal}</span>
+      </div>
+      {stat.violating > 0 && (
+        <div className="text-xs">
+          <span className={stat.violatingPct > 10 ? "text-red-600 font-semibold" : "text-amber-600"}>
+            {stat.violating} classes ({stat.violatingPct}%) violating → {stat.exposedRecords} records exposed ({stat.exposedPct}%)
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MI_VULN_COLORS = ["#16A34A", "#65A30D", "#D97706", "#EA580C", "#DC2626"];
+const MI_PRIORITY_COLORS: Record<string, string> = { P1: "text-red-600", P2: "text-amber-600", P3: "text-green-700" };
+const MI_PRIORITY_ICONS: Record<string, string> = { P1: "🔴", P2: "🟡", P3: "🟢" };
+
+function ModelInversionReport({ r, kVal, lVal, tVal }: { r: ModelInversionResult; kVal: number; lVal: number; tVal: number }) {
+  const [recPage, setRecPage] = useState(1);
+  const [recFilter, setRecFilter] = useState<"all" | "HIGH" | "CRITICAL" | "MEDIUM">("all");
+  const [recSearch, setRecSearch] = useState("");
+  const REC_PAGE_SIZE = 50;
+
+  const scoreColor = r.riskLevel === "CRITICAL" ? "text-red-600" : r.riskLevel === "HIGH" ? "text-orange-600" : r.riskLevel === "MEDIUM" ? "text-amber-600" : "text-green-600";
+  const scoreBorder = r.riskLevel === "CRITICAL" ? "border-red-400 bg-red-50 dark:bg-red-950/20" : r.riskLevel === "HIGH" ? "border-orange-400 bg-orange-50 dark:bg-orange-950/20" : r.riskLevel === "MEDIUM" ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20" : "border-green-400 bg-green-50 dark:bg-green-950/20";
+
+  const filteredRecords = r.perRecordTable.filter((row) => {
+    if (recFilter !== "all" && row.riskLevel !== recFilter) return false;
+    if (recSearch && !row.qiHash.toLowerCase().includes(recSearch.toLowerCase())) return false;
+    return true;
+  });
+  const totalRecPages = Math.max(1, Math.ceil(filteredRecords.length / REC_PAGE_SIZE));
+  const safeRecPage = Math.min(recPage, totalRecPages);
+  const pageRecords = filteredRecords.slice((safeRecPage - 1) * REC_PAGE_SIZE, safeRecPage * REC_PAGE_SIZE);
+
+  // Max MI per QI (for heatmap colour scaling)
+  const maxMI = r.miLeakageMap.length > 0 ? Math.max(...r.miLeakageMap.map((e) => e.mi)) : 1;
+  const uniqueQIs = Array.from(new Set(r.miLeakageMap.map((e) => e.qi)));
+  const uniqueSAs = Array.from(new Set(r.miLeakageMap.map((e) => e.sa)));
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCard("Inversion Risk", `${r.inversionRate}%`, "Records reconstructed > 80% conf.", <AlertTriangle className="h-4 w-4" />, "text-red-600")}
-        {kpiCard("Max Confidence", `${r.maxConfidence}%`, "Highest Naïve Bayes confidence", <Brain className="h-4 w-4" />, r.maxConfidence > 75 ? "text-red-600" : "text-green-600")}
-        {kpiCard("Reconstruction Acc.", `${r.reconstructionAccuracy}%`, "Correct attribute predictions", <Target className="h-4 w-4" />, r.reconstructionAccuracy > 60 ? "text-orange-600" : "text-green-600")}
-        {kpiCard("Avg Confidence", `${r.avgConfidence}%`, "Mean prediction probability", <BarChart3 className="h-4 w-4" />)}
+
+      {/* ── §8.1 Overall MIRisk Score ─────────────────────────────────────────── */}
+      <div className={`rounded-lg border-2 p-5 ${scoreBorder}`}>
+        <div className="flex flex-col md:flex-row md:items-center gap-4">
+          <div className="flex-1">
+            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">🔬 Model Inversion Attack — Overall Risk</div>
+            <div className={`text-5xl font-black ${scoreColor}`}>{(r.datasetMIRisk * 100).toFixed(1)}<span className="text-xl font-normal text-muted-foreground">/100</span></div>
+            <div className="mt-2">{riskBadge(r.riskLevel)}</div>
+          </div>
+          <div className="grid grid-cols-3 gap-4 flex-1">
+            <div className="text-center rounded-lg bg-white/60 dark:bg-black/20 p-3 border border-muted">
+              <div className="text-2xl font-bold">{r.totalRecords.toLocaleString()}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">Records Assessed</div>
+            </div>
+            <div className="text-center rounded-lg bg-white/60 dark:bg-black/20 p-3 border border-muted">
+              <div className={`text-2xl font-bold ${r.atRiskCount > 0 ? "text-red-600" : "text-green-600"}`}>{r.atRiskCount.toLocaleString()}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">At-Risk Records</div>
+            </div>
+            <div className="text-center rounded-lg bg-white/60 dark:bg-black/20 p-3 border border-muted">
+              <div className={`text-2xl font-bold ${r.atRiskPct > 20 ? "text-red-600" : r.atRiskPct > 5 ? "text-amber-600" : "text-green-600"}`}>{r.atRiskPct}%</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">Flagged At-Risk</div>
+            </div>
+          </div>
+        </div>
+        <div className="mt-3">
+          <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+            <span>LOW (0.00–0.30)</span><span>MEDIUM (0.31–0.60)</span><span>HIGH (0.61–0.80)</span><span>CRITICAL (0.81–1.00)</span>
+          </div>
+          <div className="relative h-3 rounded-full bg-gradient-to-r from-green-400 via-amber-400 via-orange-500 to-red-600 overflow-hidden">
+            <div
+              className="absolute top-0 h-full w-1 bg-white dark:bg-gray-900 shadow-lg rounded-full"
+              style={{ left: `${Math.min(99, r.datasetMIRisk * 100)}%`, transform: "translateX(-50%)" }}
+            />
+          </div>
+        </div>
       </div>
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Prediction Confidence Histogram</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={r.confidenceHistogram}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="count" name="Records" radius={[4, 4, 0, 0]}>
-                  {r.confidenceHistogram.map((_, i) => (
-                    <Cell key={i} fill={["#16A34A", "#D97706", "#EA580C", "#DC2626", "#7C0000"][i] || "#DC2626"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Inversion Rate at Different Confidence Thresholds</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={r.inversionCurve}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="threshold" tick={{ fontSize: 11 }} label={{ value: "Confidence Threshold", position: "insideBottom", offset: -2, fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 11 }} unit="%" />
-                <Tooltip {...CHART_TOOLTIP} />
-                <Line type="monotone" dataKey="rate" stroke="#DC2626" strokeWidth={2} dot name="Inversion Rate %" />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        {r.perSAResults.length > 0 && (
+
+      {/* ── §8.2 Attribute Inference Vulnerability Breakdown ──────────────────── */}
+      {r.perSAResults.length > 0 && (
+        <div className="grid md:grid-cols-2 gap-6">
           <Card>
-            <CardHeader><CardTitle className="text-sm">Per Sensitive Attribute Inversion Analysis</CardTitle></CardHeader>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">§8.2 — Attribute Inference Vulnerability (Max P(S|Q) per Sensitive Attribute)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={r.perSAResults} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis type="number" tick={{ fontSize: 10 }} unit="%" domain={[0, 100]} />
+                  <YAxis type="category" dataKey="sa" tick={{ fontSize: 10 }} width={90} />
+                  <Tooltip {...CHART_TOOLTIP} formatter={(v: number) => `${v}%`} />
+                  <Bar dataKey="maxConfidence" name="Max Inference Confidence" radius={[0, 4, 4, 0]}>
+                    {r.perSAResults.map((sa, i) => (
+                      <Cell key={i} fill={sa.maxConfidence > 80 ? "#DC2626" : sa.maxConfidence > 60 ? "#EA580C" : sa.maxConfidence > 40 ? "#D97706" : "#16A34A"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Sensitive Attribute Inference Summary</CardTitle>
+            </CardHeader>
             <CardContent>
               <table className="w-full text-xs">
-                <thead><tr className="border-b"><th className="text-left pb-2">Attribute</th><th className="text-right pb-2">Avg Confidence</th><th className="text-right pb-2">Max Confidence</th><th className="text-right pb-2">Inversion Rate</th><th className="text-right pb-2">Top Reconstructed Value</th><th className="text-right pb-2">Risk</th></tr></thead>
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="text-left py-1.5 px-2">Sensitive Attribute</th>
+                    <th className="text-right py-1.5 px-2">Max P(S|Q)</th>
+                    <th className="text-right py-1.5 px-2">Mean P(S|Q)</th>
+                    <th className="text-right py-1.5 px-2">At-Risk (&gt;85%)</th>
+                    <th className="text-right py-1.5 px-2">Risk</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {r.perSAResults.map((sa, i) => (
-                    <tr key={i} className="border-b border-muted">
-                      <td className="py-1.5 font-medium">{sa.sa}</td>
-                      <td className="py-1.5 text-right">{sa.avgConfidence}%</td>
-                      <td className="py-1.5 text-right font-bold" style={{ color: sa.maxConfidence > 75 ? "#DC2626" : "#16A34A" }}>{sa.maxConfidence}%</td>
-                      <td className="py-1.5 text-right">{sa.inversionRate}%</td>
-                      <td className="py-1.5 text-right text-muted-foreground">{sa.reconstructedValue.slice(0, 20)}</td>
-                      <td className="py-1.5 text-right">{riskBadge(sa.riskLevel)}</td>
+                    <tr key={i} className="border-b border-muted hover:bg-muted/20">
+                      <td className="py-1.5 px-2 font-medium truncate max-w-[100px]">{sa.sa}</td>
+                      <td className="py-1.5 px-2 text-right font-bold" style={{ color: sa.maxConfidence > 80 ? "#DC2626" : sa.maxConfidence > 60 ? "#EA580C" : "#16A34A" }}>{sa.maxConfidence}%</td>
+                      <td className="py-1.5 px-2 text-right">{sa.meanConfidence}%</td>
+                      <td className="py-1.5 px-2 text-right">{sa.atRiskPct}%</td>
+                      <td className="py-1.5 px-2 text-right">{riskBadge(sa.riskLevel)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </CardContent>
           </Card>
-        )}
-        {r.topReconstructedRecords.length > 0 && (
-          <Card>
-            <CardHeader><CardTitle className="text-sm">Top Reconstructed Records (Highest Confidence)</CardTitle></CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[220px]">
+        </div>
+      )}
+
+      {/* ── §8.3 EC VulnScore Distribution ───────────────────────────────────── */}
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">§8.3 — Equivalence Class Inversion Risk Distribution</CardTitle>
+            <p className="text-xs text-muted-foreground">VulnScore = max P(S=s | Q=v) per equivalence class</p>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={r.ecVulnDistribution}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} label={{ value: "VulnScore Range", position: "insideBottom", offset: -2, fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} label={{ value: "# ECs", angle: -90, position: "insideLeft", fontSize: 10 }} />
+                <Tooltip {...CHART_TOOLTIP} />
+                <Bar dataKey="count" name="Equivalence Classes" radius={[4, 4, 0, 0]}>
+                  {r.ecVulnDistribution.map((_, i) => (
+                    <Cell key={i} fill={MI_VULN_COLORS[i] || "#DC2626"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* ── §8.5 Small-Cell Aggregate Inversion Risk ───────────────────────── */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">§8.5 — Small-Cell Aggregate Inversion Risk</CardTitle>
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`text-xs font-bold px-2 py-0.5 rounded border ${r.smallCells.pct > 20 ? "bg-red-100 text-red-700 border-red-300" : r.smallCells.pct > 5 ? "bg-amber-100 text-amber-700 border-amber-300" : "bg-green-100 text-green-700 border-green-300"}`}>
+                AggInvRisk: {(r.aggInvRisk * 100).toFixed(1)}%
+              </span>
+              <span className="text-xs text-muted-foreground">{r.smallCells.count}/{r.smallCells.totalCells} cells with n≤5 ({r.smallCells.pct}%)</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {r.smallCells.highRiskCombos.length === 0 ? (
+              <div className="flex items-center gap-2 py-6 text-green-600 text-sm">
+                <CheckCircle className="h-5 w-5" />
+                <span>No small cells detected — aggregate inversion risk is low.</span>
+              </div>
+            ) : (
+              <ScrollArea className="h-[170px]">
                 <table className="w-full text-xs">
-                  <thead><tr className="border-b"><th className="text-left pb-1">QI Combination</th><th className="text-right pb-1">Sensitive Attr.</th><th className="text-right pb-1">Reconstructed Value</th><th className="text-right pb-1">Confidence</th></tr></thead>
+                  <thead>
+                    <tr className="border-b bg-muted/30">
+                      <th className="text-left py-1 px-2">QI Combination</th>
+                      <th className="text-right py-1 px-2">Cell Size</th>
+                      <th className="text-right py-1 px-2">AggInvRisk</th>
+                      <th className="text-right py-1 px-2">Threat</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {r.topReconstructedRecords.map((row, i) => (
-                      <tr key={i} className="border-b border-muted">
-                        <td className="py-1 pr-2 text-muted-foreground truncate max-w-[180px]">{row.qiCombo}</td>
-                        <td className="py-1 text-right">{row.targetSA}</td>
-                        <td className="py-1 text-right font-medium">{row.reconstructedValue}</td>
-                        <td className="py-1 text-right font-bold text-red-600">{row.confidence}%</td>
+                    {r.smallCells.highRiskCombos.map((c, i) => (
+                      <tr key={i} className="border-b border-muted hover:bg-muted/20">
+                        <td className="py-1 px-2 text-muted-foreground truncate max-w-[150px]">{c.combo}</td>
+                        <td className="py-1 px-2 text-right font-bold text-red-600">{c.size}</td>
+                        <td className="py-1 px-2 text-right font-mono">{(c.aggRisk * 100).toFixed(0)}%</td>
+                        <td className="py-1 px-2 text-right">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${c.size === 1 ? "bg-red-100 text-red-700 border-red-300" : "bg-amber-100 text-amber-700 border-amber-300"}`}>
+                            {c.size === 1 ? "⚠️ Singleton" : "Small Cell"}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </ScrollArea>
-            </CardContent>
-          </Card>
-        )}
+            )}
+          </CardContent>
+        </Card>
       </div>
-      <RecommendationsCard recs={r.recommendations} />
+
+      {/* ── §8.4 k/l/t Protection Analysis ───────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">§8.4 — k-Anonymity / l-Diversity / t-Closeness Protection Analysis</CardTitle>
+          <p className="text-xs text-muted-foreground">How well do configured privacy parameters protect against model inversion?</p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-3 gap-4">
+            <MIProtectionRow label="k-Anonymity" param="k" stat={r.kAnalysis} configuredVal={kVal} />
+            <MIProtectionRow label="l-Diversity" param="l" stat={r.lAnalysis} configuredVal={lVal} />
+            <MIProtectionRow label="t-Closeness" param="t" stat={r.tAnalysis} configuredVal={tVal} />
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-3 leading-relaxed">
+            <strong>k-Anonymity</strong> bounds VulnScore ≤ 1/k when satisfied.&ensp;
+            <strong>l-Diversity</strong> bounds max P(S|Q) ≤ 1/l, preventing attribute inference.&ensp;
+            <strong>t-Closeness</strong> (EMD ≤ t) prevents exploitation of skewed group distributions.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* ── §8.7 Sensitive Attribute Leakage Map (Mutual Information) ────────── */}
+      {r.miLeakageMap.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">§8.7 — Sensitive Attribute Leakage Map (Mutual Information)</CardTitle>
+            <p className="text-xs text-muted-foreground">I(Q; S) — higher MI = stronger QI→SA statistical link = higher inversion risk</p>
+          </CardHeader>
+          <CardContent>
+            {uniqueQIs.length <= 12 && uniqueSAs.length <= 6 ? (
+              <div className="overflow-x-auto">
+                <table className="text-xs border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="text-left pr-3 pb-2 text-muted-foreground">QI \ SA</th>
+                      {uniqueSAs.map((sa) => (
+                        <th key={sa} className="px-2 pb-2 text-center text-muted-foreground truncate max-w-[80px]">{sa.length > 10 ? sa.slice(0, 10) + "…" : sa}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uniqueQIs.map((qi) => (
+                      <tr key={qi}>
+                        <td className="pr-3 py-1 text-muted-foreground truncate max-w-[100px] font-medium">{qi.length > 12 ? qi.slice(0, 12) + "…" : qi}</td>
+                        {uniqueSAs.map((sa) => {
+                          const entry = r.miLeakageMap.find((e) => e.qi === qi && e.sa === sa);
+                          const mi = entry?.mi ?? 0;
+                          const intensity = maxMI > 0 ? mi / maxMI : 0;
+                          const bg = intensity > 0.8 ? "bg-red-500 text-white" : intensity > 0.6 ? "bg-orange-400 text-white" : intensity > 0.4 ? "bg-amber-300 text-gray-900" : intensity > 0.2 ? "bg-yellow-200 text-gray-800" : "bg-green-100 text-gray-700";
+                          return (
+                            <td key={sa} className={`px-3 py-1.5 text-center font-mono rounded-sm m-0.5 ${bg}`} title={`I(${qi};${sa}) = ${mi}`}>
+                              {mi.toFixed(3)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="flex items-center gap-2 mt-3 text-[10px] text-muted-foreground">
+                  <span>MI scale:</span>
+                  {["Low (0.0)", "Moderate", "Medium", "High", "Critical"].map((label, i) => (
+                    <span key={i} className={`px-1.5 py-0.5 rounded ${["bg-green-100", "bg-yellow-200", "bg-amber-300", "bg-orange-400 text-white", "bg-red-500 text-white"][i]}`}>{label}</span>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <ScrollArea className="h-[200px]">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b bg-muted/30">
+                      <th className="text-left py-1.5 px-3">Quasi-Identifier</th>
+                      <th className="text-left py-1.5 px-3">Sensitive Attribute</th>
+                      <th className="text-right py-1.5 px-3">Mutual Information</th>
+                      <th className="text-right py-1.5 px-3">Leakage Risk</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.miLeakageMap.map((entry, i) => {
+                      const intensity = maxMI > 0 ? entry.mi / maxMI : 0;
+                      const level = intensity > 0.7 ? "HIGH" : intensity > 0.4 ? "MEDIUM" : "LOW";
+                      return (
+                        <tr key={i} className="border-b border-muted hover:bg-muted/20">
+                          <td className="py-1.5 px-3">{entry.qi}</td>
+                          <td className="py-1.5 px-3">{entry.sa}</td>
+                          <td className="py-1.5 px-3 text-right font-mono">{entry.mi.toFixed(4)}</td>
+                          <td className="py-1.5 px-3 text-right">{riskBadge(level as any)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </ScrollArea>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── §8.6 Per-Record Inversion Risk Table ─────────────────────────────── */}
+      {r.perRecordTable.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className="text-sm">§8.6 — Per-Record Inversion Risk Drill-Down ({filteredRecords.length} records)</CardTitle>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-2">
+              <div className="flex gap-1">
+                {(["all", "CRITICAL", "HIGH", "MEDIUM"] as const).map((m) => (
+                  <button key={m} onClick={() => { setRecFilter(m); setRecPage(1); }}
+                    className={`px-2 py-1 text-[10px] rounded border transition-colors ${recFilter === m ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}>
+                    {m === "all" ? "All" : m === "CRITICAL" ? "🔴 Critical" : m === "HIGH" ? "🟠 High" : "🟡 Medium"}
+                  </button>
+                ))}
+              </div>
+              <div className="relative flex-1 min-w-[120px]">
+                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <Input value={recSearch} onChange={(e) => { setRecSearch(e.target.value); setRecPage(1); }}
+                  placeholder="Search QI values…" className="h-7 text-xs pl-6" />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="text-left px-3 py-2">Row #</th>
+                    <th className="text-left px-3 py-2">QI Combination</th>
+                    <th className="text-right px-3 py-2">VulnScore</th>
+                    <th className="text-right px-3 py-2">MIRisk</th>
+                    <th className="text-center px-2 py-2">Risk</th>
+                    <th className="text-center px-2 py-2">k-OK</th>
+                    <th className="text-center px-2 py-2">l-OK</th>
+                    <th className="text-center px-2 py-2">t-OK</th>
+                    <th className="text-left px-3 py-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRecords.length === 0 ? (
+                    <tr><td colSpan={9} className="text-center py-8 text-muted-foreground">No records match the current filter.</td></tr>
+                  ) : pageRecords.map((row) => (
+                    <tr key={row.rowIdx} className="border-b border-muted hover:bg-muted/20">
+                      <td className="px-3 py-1.5 text-muted-foreground">R_{String(row.rowIdx).padStart(4, "0")}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[180px]">{row.qiHash}</td>
+                      <td className="px-3 py-1.5 text-right font-mono" style={{ color: row.vulnScore > 80 ? "#DC2626" : row.vulnScore > 60 ? "#EA580C" : "#16A34A" }}>{row.vulnScore}%</td>
+                      <td className="px-3 py-1.5 text-right font-bold" style={{ color: row.miRisk > 61 ? "#DC2626" : row.miRisk > 31 ? "#D97706" : "#16A34A" }}>{row.miRisk}%</td>
+                      <td className="px-2 py-1.5 text-center">{riskBadge(row.riskLevel)}</td>
+                      <td className="px-2 py-1.5 text-center">{row.kOk ? "✅" : "❌"}</td>
+                      <td className="px-2 py-1.5 text-center">{row.lOk ? "✅" : "❌"}</td>
+                      <td className="px-2 py-1.5 text-center">{row.tOk ? "✅" : "⚠️"}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground text-[10px]">{row.action}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalRecPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-2 border-t text-xs text-muted-foreground">
+                <span>Page {safeRecPage} of {totalRecPages}</span>
+                <div className="flex gap-1">
+                  <button onClick={() => setRecPage((p) => Math.max(1, p - 1))} disabled={safeRecPage === 1}
+                    className="p-1 rounded border hover:bg-muted disabled:opacity-40"><ChevronLeft className="h-3 w-3" /></button>
+                  <button onClick={() => setRecPage((p) => Math.min(totalRecPages, p + 1))} disabled={safeRecPage === totalRecPages}
+                    className="p-1 rounded border hover:bg-muted disabled:opacity-40"><ChevronRight className="h-3 w-3" /></button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── §8.8 Recommended Mitigations ──────────────────────────────────────── */}
+      <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2 text-amber-800 dark:text-amber-200">
+            <Info className="h-4 w-4" /> §8.8 — Recommended Mitigations (Priority Ordered)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {r.recommendations.map((rec, i) => (
+              <div key={i} className="flex gap-3 items-start rounded-lg border border-amber-200 dark:border-amber-700 bg-white/60 dark:bg-black/20 p-3">
+                <span className="text-lg shrink-0">{MI_PRIORITY_ICONS[rec.priority]}</span>
+                <div className="flex-1 space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-bold ${MI_PRIORITY_COLORS[rec.priority]}`}>{rec.priority}</span>
+                    <span className="text-sm font-semibold text-foreground">{rec.mitigation}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">Target: {rec.target}</div>
+                  <div className="text-xs text-green-700 dark:text-green-400 font-medium">Expected: {rec.reduction}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -4822,7 +5150,7 @@ export default function RiskPage() {
     if (selectedAttacks.includes("recordLinkage"))       steps.push({ id: "recordLinkage",       label: "Record Linkage Attack (External Dataset Re-ID)...",          fn: () => { newResults.recordLinkage       = runRecordLinkageAttack(rawData, quasiIdentifiers, kThreshold[0], sensitiveAttributes, lThreshold[0], tVal); } });
     if (selectedAttacks.includes("attributeDisclosure")) steps.push({ id: "attributeDisclosure", label: "Attribute Disclosure Attack (Sensitive Inference)...",        fn: () => { newResults.attributeDisclosure = runAttributeDisclosureAttack(rawData, quasiIdentifiers, sensitiveAttributes, lThreshold[0], tVal); } });
     if (selectedAttacks.includes("differencing"))        steps.push({ id: "differencing",        label: "Differencing Attack (Aggregate Query Leakage)...",            fn: () => { newResults.differencing        = runDifferencingAttack(rawData, quasiIdentifiers, sensitiveAttributes, kThreshold[0], lThreshold[0], tVal); } });
-    if (selectedAttacks.includes("modelInversion"))      steps.push({ id: "modelInversion",      label: "Model Inversion Attack (Naïve Bayes Reconstruction)...",      fn: () => { newResults.modelInversion      = runModelInversionAttack(rawData, quasiIdentifiers, sensitiveAttributes); } });
+    if (selectedAttacks.includes("modelInversion"))      steps.push({ id: "modelInversion",      label: "Model Inversion Attack (EC-Based Reconstruction)...",      fn: () => { newResults.modelInversion      = runModelInversionAttack(rawData, quasiIdentifiers, sensitiveAttributes, kThreshold[0], lThreshold[0], tVal); } });
 
     for (let i = 0; i < steps.length; i++) {
       setProgress({ step: `${i + 1}/${steps.length}: Running ${steps[i].label}`, pct: Math.round((i / steps.length) * 100) });
@@ -5380,7 +5708,7 @@ export default function RiskPage() {
                       {a.id === "recordLinkage"       && <RecordLinkageReport r={results.recordLinkage!} kThreshold={kThreshold[0]} />}
                       {a.id === "attributeDisclosure" && <AttributeDisclosureReport r={results.attributeDisclosure!} />}
                       {a.id === "differencing"        && <DifferencingReport r={results.differencing!} />}
-                      {a.id === "modelInversion"      && <ModelInversionReport r={results.modelInversion!} />}
+                      {a.id === "modelInversion"      && <ModelInversionReport r={results.modelInversion!} kVal={kThreshold[0]} lVal={lThreshold[0]} tVal={tThreshold[0] / 100} />}
                     </>
                   ) : (
                     <Card className="flex items-center justify-center py-12 text-muted-foreground text-sm">
