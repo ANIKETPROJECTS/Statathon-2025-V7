@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +37,7 @@ import { runDifferencingAttack, type DifferencingResult } from "@/lib/attacks/di
 import { runModelInversionAttack, type ModelInversionResult } from "@/lib/attacks/modelInversionAttack";
 import { computeCompositeScore, type CompositeResult } from "@/lib/attacks/compositeScore";
 import { sampleData, type DataRow, RISK_COLORS, type RiskLevel } from "@/lib/attacks/utils";
+import { runAutoAssist, type AutoAssistResult, type ColumnClass } from "@/lib/autoAssist";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1357,6 +1358,9 @@ export default function RiskPage() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
   const [activeTab, setActiveTab] = useState("prosecutor");
+  const [autoAssist, setAutoAssist] = useState<AutoAssistResult | null>(null);
+  const [autoAssistLoading, setAutoAssistLoading] = useState(false);
+  const appliedDataset = useRef<string>("");
 
   const { data: datasets, isLoading: datasetsLoading } = useQuery<Dataset[]>({ queryKey: ["/api/datasets"] });
 
@@ -1367,6 +1371,39 @@ export default function RiskPage() {
     queryKey: ["/api/data", selectedDataset],
     enabled: !!selectedDataset,
   });
+
+  // Run auto-assist whenever a new dataset's data loads
+  useEffect(() => {
+    if (!datasetData?.data?.length || !selectedDatasetObj) { setAutoAssist(null); return; }
+    setAutoAssistLoading(true);
+    const t = setTimeout(() => {
+      try {
+        const result = runAutoAssist(datasetData.data, selectedDatasetObj.columns ?? []);
+        setAutoAssist(result);
+        if (appliedDataset.current !== selectedDataset) {
+          setQuasiIdentifiers(result.columnGroups.quasiIdentifiers);
+          setSensitiveAttributes(result.columnGroups.sensitiveAttributes);
+          setKThreshold([result.suggestedParams.k]);
+          setLThreshold([Math.max(2, result.suggestedParams.l)]);
+          setTThreshold([Math.round(result.suggestedParams.t * 100)]);
+          setSamplePct([result.suggestedParams.samplePct]);
+          appliedDataset.current = selectedDataset;
+        }
+      } catch (e) { console.error("auto-assist error", e); }
+      setAutoAssistLoading(false);
+    }, 80);
+    return () => clearTimeout(t);
+  }, [datasetData?.data, selectedDataset]);
+
+  const applyAutoSuggestions = () => {
+    if (!autoAssist) return;
+    setQuasiIdentifiers(autoAssist.columnGroups.quasiIdentifiers);
+    setSensitiveAttributes(autoAssist.columnGroups.sensitiveAttributes);
+    setKThreshold([autoAssist.suggestedParams.k]);
+    setLThreshold([Math.max(2, autoAssist.suggestedParams.l)]);
+    setTThreshold([Math.round(autoAssist.suggestedParams.t * 100)]);
+    setSamplePct([autoAssist.suggestedParams.samplePct]);
+  };
 
   const toggleColumn = (col: string, type: "quasi" | "sensitive") => {
     if (type === "quasi") setQuasiIdentifiers((p) => p.includes(col) ? p.filter((c) => c !== col) : [...p, col]);
@@ -1466,32 +1503,76 @@ export default function RiskPage() {
 
               {selectedDatasetObj && (
                 <>
+                  {autoAssistLoading && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Analysing columns…
+                    </div>
+                  )}
+
+                  {/* Direct ID warnings */}
+                  {autoAssist && autoAssist.columnGroups.directIdentifiers.length > 0 && (
+                    <div className="rounded-md border border-orange-300 bg-orange-50 dark:bg-orange-950/30 p-2 space-y-1">
+                      <p className="text-xs font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" /> Direct Identifiers Detected
+                      </p>
+                      {autoAssist.columnGroups.directIdentifiers.map((col) => (
+                        <p key={col} className="text-xs text-orange-600 dark:text-orange-300 pl-1">⚠ {col}</p>
+                      ))}
+                      <p className="text-[10px] text-orange-500 dark:text-orange-400">Remove these before public release.</p>
+                    </div>
+                  )}
+
+                  {/* QI columns */}
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quasi-Identifiers</Label>
-                    <ScrollArea className="h-[110px] rounded-md border p-2">
-                      <div className="space-y-1.5">
-                        {selectedDatasetObj.columns?.map((col) => (
-                          <div key={col} className="flex items-center gap-2">
-                            <Checkbox id={`qi-${col}`} checked={quasiIdentifiers.includes(col)} onCheckedChange={() => toggleColumn(col, "quasi")} />
-                            <label htmlFor={`qi-${col}`} className="text-xs cursor-pointer">{col}</label>
-                          </div>
-                        ))}
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quasi-Identifiers</Label>
+                      <Badge variant="outline" className="text-[10px] h-4 px-1">{quasiIdentifiers.length} sel.</Badge>
+                    </div>
+                    <ScrollArea className="h-[120px] rounded-md border p-2">
+                      <div className="space-y-1">
+                        {selectedDatasetObj.columns?.map((col) => {
+                          const cls = autoAssist?.classifications[col];
+                          const badge = cls?.confidenceLabel === "HIGH" ? "🟢" : cls?.confidenceLabel === "MEDIUM" ? "🟡" : cls ? "🔵" : null;
+                          return (
+                            <div key={col} className="flex items-center gap-1.5" title={cls?.reason ?? col}>
+                              <Checkbox id={`qi-${col}`} checked={quasiIdentifiers.includes(col)} onCheckedChange={() => toggleColumn(col, "quasi")} />
+                              <label htmlFor={`qi-${col}`} className="text-xs cursor-pointer flex-1 truncate">{col}</label>
+                              {badge && cls?.classification === "QUASI_ID" && <span className="text-[10px]">{badge}</span>}
+                            </div>
+                          );
+                        })}
                       </div>
                     </ScrollArea>
                   </div>
+
+                  {/* SA columns */}
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sensitive Attributes</Label>
-                    <ScrollArea className="h-[110px] rounded-md border p-2">
-                      <div className="space-y-1.5">
-                        {selectedDatasetObj.columns?.map((col) => (
-                          <div key={col} className="flex items-center gap-2">
-                            <Checkbox id={`sa-${col}`} checked={sensitiveAttributes.includes(col)} onCheckedChange={() => toggleColumn(col, "sensitive")} />
-                            <label htmlFor={`sa-${col}`} className="text-xs cursor-pointer">{col}</label>
-                          </div>
-                        ))}
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sensitive Attributes</Label>
+                      <Badge variant="outline" className="text-[10px] h-4 px-1">{sensitiveAttributes.length} sel.</Badge>
+                    </div>
+                    <ScrollArea className="h-[100px] rounded-md border p-2">
+                      <div className="space-y-1">
+                        {selectedDatasetObj.columns?.map((col) => {
+                          const cls = autoAssist?.classifications[col];
+                          const badge = cls?.confidenceLabel === "HIGH" ? "🟢" : cls?.confidenceLabel === "MEDIUM" ? "🟡" : cls ? "🔵" : null;
+                          return (
+                            <div key={col} className="flex items-center gap-1.5" title={cls?.reason ?? col}>
+                              <Checkbox id={`sa-${col}`} checked={sensitiveAttributes.includes(col)} onCheckedChange={() => toggleColumn(col, "sensitive")} />
+                              <label htmlFor={`sa-${col}`} className="text-xs cursor-pointer flex-1 truncate">{col}</label>
+                              {badge && cls?.classification === "SENSITIVE" && <span className="text-[10px]">{badge}</span>}
+                            </div>
+                          );
+                        })}
                       </div>
                     </ScrollArea>
                   </div>
+
+                  {autoAssist && (
+                    <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={applyAutoSuggestions}>
+                      ↺ Reset to Auto-Suggestions
+                    </Button>
+                  )}
                 </>
               )}
 
@@ -1499,30 +1580,44 @@ export default function RiskPage() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">K-Anonymity</Label>
-                  <Badge variant="outline" className="text-xs">{kThreshold[0]}</Badge>
+                  <div className="flex items-center gap-1">
+                    {autoAssist && <span className="text-[10px] text-muted-foreground">Sug: {autoAssist.suggestedParams.k}</span>}
+                    <Badge variant="outline" className="text-xs">{kThreshold[0]}</Badge>
+                  </div>
                 </div>
-                <Slider value={kThreshold} onValueChange={setKThreshold} min={2} max={20} step={1} />
+                <Slider value={kThreshold} onValueChange={setKThreshold} min={2} max={25} step={1} />
+                {autoAssist && <p className="text-[10px] text-muted-foreground leading-tight">{autoAssist.paramDetails.k.reason}</p>}
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">L-Diversity Threshold</Label>
-                  <Badge variant="outline" className="text-xs">{lThreshold[0]}</Badge>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">L-Diversity</Label>
+                  <div className="flex items-center gap-1">
+                    {autoAssist && <span className="text-[10px] text-muted-foreground">Sug: {autoAssist.suggestedParams.l}</span>}
+                    <Badge variant="outline" className="text-xs">{lThreshold[0]}</Badge>
+                  </div>
                 </div>
-                <Slider value={lThreshold} onValueChange={setLThreshold} min={1} max={5} step={1} />
+                <Slider value={lThreshold} onValueChange={setLThreshold} min={2} max={10} step={1} />
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">T-Closeness Threshold</Label>
-                  <Badge variant="outline" className="text-xs">{tThreshold[0] / 100}</Badge>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">T-Closeness</Label>
+                  <div className="flex items-center gap-1">
+                    {autoAssist && <span className="text-[10px] text-muted-foreground">Sug: {autoAssist.suggestedParams.t.toFixed(2)}</span>}
+                    <Badge variant="outline" className="text-xs">{(tThreshold[0] / 100).toFixed(2)}</Badge>
+                  </div>
                 </div>
                 <Slider value={tThreshold} onValueChange={setTThreshold} min={5} max={50} step={5} />
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sample Size</Label>
-                  <Badge variant="outline" className="text-xs">{samplePct[0]}%</Badge>
+                  <div className="flex items-center gap-1">
+                    {autoAssist && <span className="text-[10px] text-muted-foreground">Sug: {autoAssist.suggestedParams.samplePct}%</span>}
+                    <Badge variant="outline" className="text-xs">{samplePct[0]}%</Badge>
+                  </div>
                 </div>
                 <Slider value={samplePct} onValueChange={setSamplePct} min={10} max={100} step={10} />
+                {autoAssist && <p className="text-[10px] text-muted-foreground leading-tight">{autoAssist.paramDetails.sample.reason}</p>}
               </div>
 
               {/* Attack selection */}
@@ -1563,6 +1658,248 @@ export default function RiskPage() {
         {/* ── RIGHT PANEL ── */}
         <div className="lg:col-span-3">
           {!hasResults ? (
+            autoAssist ? (
+              <div className="space-y-4">
+                {/* Banner */}
+                <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800">
+                  <CardContent className="py-3 px-4">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 rounded-full bg-blue-100 dark:bg-blue-900 p-1.5"><Network className="h-4 w-4 text-blue-600 dark:text-blue-400" /></div>
+                      <div>
+                        <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">📋 Auto-Assist Column Analysis</p>
+                        <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+                          Analysed <strong>{autoAssist.datasetInfo.rows}</strong> rows × <strong>{autoAssist.datasetInfo.columns}</strong> columns.
+                          Pre-selected <strong>{autoAssist.columnGroups.quasiIdentifiers.length}</strong> QIs and <strong>{autoAssist.columnGroups.sensitiveAttributes.length}</strong> sensitive attributes.
+                          Review and adjust in the left sidebar, then run the assessment.
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* 4-Quadrant Classification Grid */}
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Direct Identifiers */}
+                  <Card className="border-orange-200 dark:border-orange-800">
+                    <CardHeader className="pb-2 pt-3 px-4">
+                      <CardTitle className="text-xs font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5" /> DIRECT IDENTIFIERS
+                      </CardTitle>
+                      <CardDescription className="text-[10px]">May need removal before release</CardDescription>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3 space-y-1.5">
+                      {autoAssist.columnGroups.directIdentifiers.length === 0
+                        ? <p className="text-xs text-muted-foreground italic">None detected ✓</p>
+                        : autoAssist.columnGroups.directIdentifiers.map((col) => {
+                            const c = autoAssist.classifications[col];
+                            return (
+                              <div key={col} className="rounded bg-orange-50 dark:bg-orange-950/30 px-2 py-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-orange-800 dark:text-orange-300">{col}</span>
+                                  <Badge className="text-[10px] h-4 px-1 bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300 border-0">{c.confidence}%</Badge>
+                                </div>
+                                <p className="text-[10px] text-orange-600 dark:text-orange-400 mt-0.5 leading-tight">{c.reason}</p>
+                              </div>
+                            );
+                          })
+                      }
+                    </CardContent>
+                  </Card>
+
+                  {/* Quasi-Identifiers */}
+                  <Card className="border-red-200 dark:border-red-800">
+                    <CardHeader className="pb-2 pt-3 px-4">
+                      <CardTitle className="text-xs font-semibold text-red-700 dark:text-red-400 flex items-center gap-1.5">
+                        🔴 QUASI-IDENTIFIERS
+                      </CardTitle>
+                      <CardDescription className="text-[10px]">Can indirectly identify individuals</CardDescription>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3">
+                      <ScrollArea className="h-[140px]">
+                        <div className="space-y-1.5">
+                          {autoAssist.columnGroups.quasiIdentifiers.length === 0
+                            ? <p className="text-xs text-muted-foreground italic">None detected</p>
+                            : autoAssist.columnGroups.quasiIdentifiers.map((col) => {
+                                const c = autoAssist.classifications[col];
+                                const contrib = autoAssist.qiContributions[col];
+                                const badge = c.confidenceLabel === "HIGH" ? "🟢" : c.confidenceLabel === "MEDIUM" ? "🟡" : "🔵";
+                                return (
+                                  <div key={col} className="rounded bg-red-50 dark:bg-red-950/30 px-2 py-1">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-xs font-medium text-red-800 dark:text-red-300 truncate">{col}</span>
+                                      <span className="text-[10px] shrink-0">{badge}</span>
+                                    </div>
+                                    <p className="text-[10px] text-red-500 dark:text-red-400 mt-0.5 leading-tight">{c.reason}</p>
+                                    {contrib && <p className="text-[10px] text-red-400 dark:text-red-500 font-mono">+{contrib.marginalRiskPct}% marginal EC risk</p>}
+                                  </div>
+                                );
+                              })
+                          }
+                        </div>
+                      </ScrollArea>
+                    </CardContent>
+                  </Card>
+
+                  {/* Sensitive Attributes */}
+                  <Card className="border-amber-200 dark:border-amber-800">
+                    <CardHeader className="pb-2 pt-3 px-4">
+                      <CardTitle className="text-xs font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                        🟠 SENSITIVE ATTRIBUTES
+                      </CardTitle>
+                      <CardDescription className="text-[10px]">Disclosure could harm individuals</CardDescription>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3">
+                      <ScrollArea className="h-[140px]">
+                        <div className="space-y-1.5">
+                          {autoAssist.columnGroups.sensitiveAttributes.length === 0
+                            ? <p className="text-xs text-muted-foreground italic">None detected</p>
+                            : autoAssist.columnGroups.sensitiveAttributes.map((col) => {
+                                const c = autoAssist.classifications[col];
+                                const badge = c.confidenceLabel === "HIGH" ? "🟢" : c.confidenceLabel === "MEDIUM" ? "🟡" : "🔵";
+                                return (
+                                  <div key={col} className="rounded bg-amber-50 dark:bg-amber-950/30 px-2 py-1">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-xs font-medium text-amber-800 dark:text-amber-300 truncate">{col}</span>
+                                      <span className="text-[10px] shrink-0">{badge}</span>
+                                    </div>
+                                    <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 leading-tight">{c.reason}</p>
+                                  </div>
+                                );
+                              })
+                          }
+                        </div>
+                      </ScrollArea>
+                    </CardContent>
+                  </Card>
+
+                  {/* Ignore */}
+                  <Card className="border-slate-200 dark:border-slate-700">
+                    <CardHeader className="pb-2 pt-3 px-4">
+                      <CardTitle className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                        ⚪ IGNORE
+                      </CardTitle>
+                      <CardDescription className="text-[10px]">No privacy relevance</CardDescription>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3">
+                      <ScrollArea className="h-[140px]">
+                        <div className="space-y-1">
+                          {autoAssist.columnGroups.ignore.length === 0
+                            ? <p className="text-xs text-muted-foreground italic">None</p>
+                            : autoAssist.columnGroups.ignore.map((col) => {
+                                const c = autoAssist.classifications[col];
+                                return (
+                                  <div key={col} className="flex items-center justify-between rounded bg-slate-50 dark:bg-slate-800/30 px-2 py-1">
+                                    <span className="text-xs text-slate-500 dark:text-slate-400 truncate">{col}</span>
+                                    <span className="text-[10px] text-slate-400 shrink-0 ml-1">{c.confidence}%</span>
+                                  </div>
+                                );
+                              })
+                          }
+                        </div>
+                      </ScrollArea>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* QI Contribution Table */}
+                {Object.keys(autoAssist.qiContributions).length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2 pt-3 px-4">
+                      <CardTitle className="text-sm flex items-center gap-2"><BarChart3 className="h-4 w-4 text-blue-600" /> QI Re-Identification Contribution Ranking</CardTitle>
+                      <CardDescription className="text-xs">How much each quasi-identifier increases re-identification risk</CardDescription>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3">
+                      {/* High-risk warning */}
+                      {Object.entries(autoAssist.qiContributions).some(([, v]) => v.marginalRiskPct > 30) && (
+                        <div className="mb-3 rounded-md border border-red-200 bg-red-50 dark:bg-red-950/30 p-3">
+                          <p className="text-xs font-semibold text-red-700 dark:text-red-400">⚠ High-Risk Quasi-Identifier Detected</p>
+                          {Object.entries(autoAssist.qiContributions)
+                            .filter(([, v]) => v.marginalRiskPct > 30)
+                            .map(([col, v]) => (
+                              <p key={col} className="text-xs text-red-600 dark:text-red-300 mt-1">
+                                <strong>{col}</strong> alone contributes +{v.marginalRiskPct}% to re-identification risk ({v.soloUniqueValues} unique values).
+                              </p>
+                            ))}
+                        </div>
+                      )}
+                      <div className="rounded-md border overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="text-left px-3 py-2 font-semibold">Column</th>
+                              <th className="text-right px-3 py-2 font-semibold">Unique Values</th>
+                              <th className="text-right px-3 py-2 font-semibold">Marginal Risk</th>
+                              <th className="text-center px-3 py-2 font-semibold">Rank</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(autoAssist.qiContributions)
+                              .sort((a, b) => a[1].riskRank - b[1].riskRank)
+                              .map(([col, v]) => (
+                                <tr key={col} className="border-t border-border/50 hover:bg-muted/30 transition-colors">
+                                  <td className="px-3 py-2 font-medium truncate max-w-[120px]">{col}</td>
+                                  <td className="px-3 py-2 text-right font-mono">{v.soloUniqueValues}</td>
+                                  <td className="px-3 py-2 text-right">
+                                    <span className={v.marginalRiskPct > 30 ? "text-red-600 font-semibold" : v.marginalRiskPct > 10 ? "text-amber-600" : "text-green-600"}>
+                                      +{v.marginalRiskPct}%
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className={v.riskRank === 1 ? "text-red-600" : v.riskRank === 2 ? "text-amber-600" : "text-green-600"}>
+                                      {v.riskRank === 1 ? "🔴" : v.riskRank === 2 ? "🟡" : "🟢"} #{v.riskRank}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Parameter Suggestion Panel */}
+                <Card>
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <CardTitle className="text-sm flex items-center gap-2">⚙️ Auto-Suggested Privacy Parameters</CardTitle>
+                    <CardDescription className="text-xs">Based on your data's equivalence class structure</CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: "K-Anonymity", value: `k = ${autoAssist.suggestedParams.k}`, reason: autoAssist.paramDetails.k.reason, color: "blue" },
+                        { label: "Sample Size", value: `${autoAssist.suggestedParams.samplePct}%`, reason: autoAssist.paramDetails.sample.reason, color: "purple" },
+                      ].map(({ label, value, reason, color }) => (
+                        <div key={label} className={`rounded-md border border-${color}-200 dark:border-${color}-800 bg-${color}-50 dark:bg-${color}-950/20 p-3`}>
+                          <p className={`text-xs font-semibold text-${color}-700 dark:text-${color}-400`}>{label}</p>
+                          <p className={`text-lg font-bold text-${color}-800 dark:text-${color}-300 mt-0.5`}>{value}</p>
+                          <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20 p-3">
+                        <p className="text-xs font-semibold text-green-700 dark:text-green-400">L-Diversity</p>
+                        <p className="text-lg font-bold text-green-800 dark:text-green-300 mt-0.5">l = {autoAssist.suggestedParams.l}</p>
+                        {Object.values(autoAssist.paramDetails.l)[0] && (
+                          <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{Object.values(autoAssist.paramDetails.l)[0].reason}</p>
+                        )}
+                      </div>
+                      <div className="rounded-md border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/20 p-3">
+                        <p className="text-xs font-semibold text-teal-700 dark:text-teal-400">T-Closeness</p>
+                        <p className="text-lg font-bold text-teal-800 dark:text-teal-300 mt-0.5">t = {autoAssist.suggestedParams.t.toFixed(2)}</p>
+                        {Object.values(autoAssist.paramDetails.t)[0] && (
+                          <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{Object.values(autoAssist.paramDetails.t)[0].reason}</p>
+                        )}
+                      </div>
+                    </div>
+                    <Button className="w-full" variant="outline" onClick={applyAutoSuggestions}>
+                      ← Use Suggested Values
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
             <Card className="flex flex-col items-center justify-center py-24 text-center">
               <Network className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-1">No Assessment Results Yet</h3>
@@ -1570,6 +1907,7 @@ export default function RiskPage() {
                 Select a dataset, configure quasi-identifiers and sensitive attributes, then click <strong>Run Assessment</strong> to analyse privacy risks across all 10 attack types.
               </p>
             </Card>
+            )
           ) : (
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="flex flex-wrap h-auto gap-1 mb-4">
