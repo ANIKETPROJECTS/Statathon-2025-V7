@@ -1,0 +1,84 @@
+## Inference Attack Results — Accuracy Analysis
+
+---
+
+### ✅ CORRECT & ACCURATE
+
+**1. Risk Level: CRITICAL, Form A = 100% for all 5 sensitive attributes**
+Mathematically correct. All 20 ECs have size = 1 (still singletons even with 6 QIs minus District). When EC size = 1, the dominant value confidence is always 1/1 = **100%** by definition. The math is sound. ✅
+
+**2. Highest Form A Risk = 100%, Avg Form A Risk = 100%**
+Consistent with all 20 ECs being singletons. Every single EC has exactly one value → confidence = 100% → average = 100%. ✅
+
+**3. Form B = "Insufficient data" for all 5 SAs**
+Correctly flagged. Form B requires a CART decision tree with cross-validation, needing minimum 10 records per category. With only 20 total records and NCO_2004 having ~15 unique occupation values (Agricultural Labourer, Domestic Helper, Doctor, etc.), no category has ≥10 records. The system correctly refuses to compute Form B and says so. ✅
+
+**4. Form B Computed = 0/5**
+Accurate — none of the 5 sensitive attributes had sufficient data for global model training. ✅
+
+**5. Hidden Risk ECs = 0**
+Correct. Hidden Risk ECs are defined as ECs that PASS L-Diversity but still have Form A confidence >70%. Since all ECs FAIL L-Diversity (all singletons), there are no "hidden" ones — they're all already flagged. ✅
+
+**6. Attack Walkthrough steps are logically correct**
+- Step 1: Filter to 1 record matching Uttarakhand+Rural+SC+Christianity+HH_Size=2+Single Member ✅
+- Step 2: 1 out of 1 records = Agricultural Labourer → 100% confidence ✅
+- Step 3: Correct explanation that k-anonymity doesn't protect against inference ✅
+- Step 4: 20/20 ECs have Form A ≥ 80% ✅
+
+**7. Form A Confidence Distribution Chart**
+All 20 ECs in the 0.90–1.00 bucket, 0 in all other buckets. Correct — since every EC confidence = exactly 1.00. ✅
+
+**8. Inference Risk Summary bars — all 100% red**
+All 5 SAs show 100% records in high-risk groups. Consistent with Form A = 100% across all ECs. ✅
+
+---
+
+### ⚠️ ISSUES FOUND
+
+**1. 🔴 CRITICAL LOGICAL PROBLEM — Form A 100% is again a singleton artifact, but this time the system does NOT add a structural artifact warning**
+
+This is the **same structural artifact issue** from the Journalist run — all ECs are singletons, so Form A is trivially 100%. But unlike the L-Diversity and T-Closeness sections (which now have yellow "STRUCTURAL ARTIFACT" banners), **Form A has no such disclaimer**.
+
+The result is technically correct math but **misleading in meaning**:
+- Form A 100% on singleton ECs ≠ genuine inference vulnerability
+- It just means the dataset is too granular for group-based inference to be meaningful
+- A truly dangerous inference result would be Form A = 100% on ECs of size **≥2**, where multiple different people share the same QI profile yet all have the same sensitive value
+
+**The system should add the same type of structural artifact warning here**, such as: *"All ECs are singletons — Form A confidence of 100% is a mathematical artifact, not evidence of group-level inference risk. Reduce QI granularity to obtain meaningful inference results."* 🔴
+
+**2. 🟡 Form A vs L-Diversity Cross-Check Table — all flagged as "Already flagged"**
+This is consistent and correct — since all ECs fail L-Diversity AND have 100% Form A, there are no hidden risks, just redundant flags. However the table adds no new information and could confuse users into thinking there are 20 separate distinct risk issues rather than one systemic singleton problem. Minor UX issue. 🟡
+
+**3. 🟡 Recommendations say "CRITICAL" for all 5 SAs equally**
+While technically accurate, recommending noise/perturbation or suppression for `Land_Owned` (continuous acreage values — every record is unique by nature) is **not the right fix**. The actual fix needed is **reducing QI granularity** (coarser grouping of State_Region or removing HH_Size) to allow multi-record ECs to form. The recommendation to "add noise/perturbation" to Land_Owned is valid but incomplete — it won't fix the singleton problem. 🟡
+
+**4. 🟡 Sample Size Warning exists but is undersized**
+The yellow banner says *"Sample size too small for robust statistical inference — results are indicative only."* This is correct and good. But it only appears at the top of the results. It should ideally also appear next to each SA's Form A section to reinforce context per attribute. Minor. 🟡
+
+---
+
+### One Deeper Statistical Point 🔬
+
+For `NREG_Job_Card` and `Saving_Bank_Held_by_any_member` (binary Yes/No attributes), Form A = 100% means every singleton EC has one value. But looking at the actual data:
+- NREG_Job_Card: ~4 Yes, ~16 No out of 20 records
+- Saving_Bank: ~5 Yes, ~15 No
+
+A **random baseline guesser** who always predicts "No" would be correct ~75-80% of the time. So the **true inference lift** of Form A over baseline is only ~20-25 percentage points — not as dramatic as "100% vs 0%." The system should ideally report **baseline accuracy** alongside Form A confidence for binary attributes to show true attacker lift. Form B would do this but failed due to insufficient data.
+
+---
+
+### Summary Table
+
+| Section | Accurate? |
+|---|---|
+| Form A = 100% math | ✅ Correct |
+| Form B = insufficient data | ✅ Correct |
+| Hidden Risk ECs = 0 | ✅ Correct |
+| Attack Walkthrough logic | ✅ Correct |
+| Confidence distribution chart | ✅ Correct |
+| No structural artifact warning on Form A | 🔴 Missing — same fix needed as L-Diversity/T-Closeness |
+| CRITICAL recommendations for all 5 equally | 🟡 Oversimplified |
+| No baseline comparison for binary SAs | 🟡 Statistical gap |
+| Sample size warning placement | 🟡 Should repeat per SA |
+
+**Core verdict:** The math is correct throughout, but **Form A needs the same structural artifact disclaimer** that was correctly added to L-Diversity and T-Closeness. The inference attack is showing a singleton artifact, not a genuine group-level inference vulnerability — and the system should say so.
