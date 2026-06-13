@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import {
   Shield, Lock, Database, Shuffle, Sparkles, Play, Loader2,
   CheckCircle, Download, Info, Network, Key, Server,
@@ -31,7 +32,7 @@ import {
 } from "@/lib/privacy/sdc";
 import type { GeneralisationColConfig } from "@/lib/privacy/sdc";
 import { applyLaplace, applyGaussian, applyExponential, applyMixed, epsilonLabel, epsilonBadgeClass, type SensitivityMode } from "@/lib/privacy/dp";
-import { applyStatisticalSDG, applyDPSDG } from "@/lib/privacy/synthetic";
+import { applyStatisticalSDG, applyDPSDG, computeSigmaFromEpsilon, computeEpsilonFromSigma } from "@/lib/privacy/synthetic";
 import { applyHomomorphicEncryption, applySMPC } from "@/lib/privacy/crypto";
 import { applyFederatedLearning } from "@/lib/privacy/federated";
 import { ATTACK_MATRIX, ATTACK_COLUMNS, countMitigations, type MitigationLevel } from "@/lib/privacy/attackMatrix";
@@ -651,9 +652,14 @@ export default function PrivacyPage() {
   const [dpProtectCategorical, setDpProtectCategorical] = useState(true);
 
   // ── SDG parameters ─────────────────────────────────────────────────────────
-  const [synthSize,    setSynthSize]    = useState([100]);
-  const [preserveCorr, setPreserveCorr] = useState(true);
-  const [dpSgdClip,    setDpSgdClip]   = useState([1.0]);
+  const [synthSize,         setSynthSize]         = useState([100]);
+  const [preserveCorr,      setPreserveCorr]      = useState(true);
+  const [synthBandwidthRule, setSynthBandwidthRule] = useState<"silverman"|"scott"|"fixed">("silverman");
+  const [synthSeedEnabled,  setSynthSeedEnabled]  = useState(false);
+  const [synthSeed,         setSynthSeed]          = useState(42);
+  const [dpSgdClip,         setDpSgdClip]         = useState([1.0]);
+  const [dpSgdEpochs,       setDpSgdEpochs]       = useState(300);
+  const [dpSgdBatchSize,    setDpSgdBatchSize]     = useState(500);
 
   // ── Crypto parameters ──────────────────────────────────────────────────────
   const [heKeySize,     setHeKeySize]     = useState("1024");
@@ -890,9 +896,7 @@ export default function PrivacyPage() {
     (tcfg.tc === "cond" && (suppCriterion === "outlier" || suppCriterion === "threshold"))
   );
 
-  const showTC_other = family !== "sdc" && (
-    family === "synthetic" || family === "crypto"
-  );
+  const showTC_other = family === "crypto";
 
   // Filtered target columns per technique
   const filteredTargetCols: string[] = (() => {
@@ -1087,8 +1091,15 @@ export default function PrivacyPage() {
         }
       } else if (family === "synthetic") {
         switch (sdgTech) {
-          case "stat-sdg": res = applyStatisticalSDG(rawData, synthSize[0], preserveCorr); break;
-          case "dp-sdg":   res = applyDPSDG(rawData, epsilon[0], delta[0], synthSize[0], dpSgdClip[0]); break;
+          case "stat-sdg": res = applyStatisticalSDG(rawData, {
+            targetSize: synthSize[0], preserveCorrelations: preserveCorr,
+            bandwidthRule: synthBandwidthRule, seed: synthSeedEnabled ? synthSeed : null,
+          }); break;
+          case "dp-sdg": res = applyDPSDG(rawData, {
+            targetSize: synthSize[0], epsilon: epsilon[0], delta: delta[0],
+            clipNorm: dpSgdClip[0], epochs: dpSgdEpochs, batchSize: dpSgdBatchSize,
+            seed: synthSeedEnabled ? synthSeed : null,
+          }); break;
           default: throw new Error("Unknown SDG technique");
         }
       } else if (family === "crypto") {
@@ -1122,7 +1133,7 @@ export default function PrivacyPage() {
     } finally {
       setRunning(false);
     }
-  }, [family, sdcTech, dpTech, sdgTech, cryptoTech, fedTech, rawData, quasiIdentifiers, sensitiveAttr, targetCols, filteredTargetCols, allCols, kVal, suppLimit, lVal, lMethod, lKBase, cRecursive, tVal, tKBase, swapFrac, microK, microDist, pramRetention, pramVariant, topPct, botPct, addNoise, noiseLevel, noiseDist, noiseLambda, noiseClip, suppMode, suppCriterion, suppBudget, suppMinGroup, suppZThreshold, suppSACol, suppRiskVals, suppLower, suppUpper, suppMinCellFreq, genColConfigs, shuffleVariant, shuffleGroupCol, shuffleRankDelta, csRowCol, csColCol, csValCol, csAggregate, csNMin, csPPct, csKDom, csSecondary, epsilon, delta, synthSize, preserveCorr, dpSgdClip, heKeySize, smpcShares, smpcThreshold, fedNodes, fedRounds, fedDP, fedEps, fedGenSynth, selectedDataset, toast]);
+  }, [family, sdcTech, dpTech, sdgTech, cryptoTech, fedTech, rawData, quasiIdentifiers, sensitiveAttr, targetCols, filteredTargetCols, allCols, kVal, suppLimit, lVal, lMethod, lKBase, cRecursive, tVal, tKBase, swapFrac, microK, microDist, pramRetention, pramVariant, topPct, botPct, addNoise, noiseLevel, noiseDist, noiseLambda, noiseClip, suppMode, suppCriterion, suppBudget, suppMinGroup, suppZThreshold, suppSACol, suppRiskVals, suppLower, suppUpper, suppMinCellFreq, genColConfigs, shuffleVariant, shuffleGroupCol, shuffleRankDelta, csRowCol, csColCol, csValCol, csAggregate, csNMin, csPPct, csKDom, csSecondary, epsilon, delta, dpProtectCategorical, synthSize, preserveCorr, synthBandwidthRule, synthSeedEnabled, synthSeed, dpSgdClip, dpSgdEpochs, dpSgdBatchSize, heKeySize, smpcShares, smpcThreshold, fedNodes, fedRounds, fedDP, fedEps, fedGenSynth, selectedDataset, toast]);
 
   return (
     <DashboardLayout title="Privacy Enhancement" breadcrumbs={[{ label: "Privacy Enhancement" }]}>
@@ -2263,31 +2274,114 @@ export default function PrivacyPage() {
                     </CardHeader>
                     <CardContent className="space-y-5">
                       <FormulaBox id={sdgTech} />
-                      <SliderField label="Output Size" value={synthSize} onChange={setSynthSize} min={25} max={200} step={5} format={(v) => `${v}%`} helpText={`Generate ${Math.round((rawData.length || 100) * synthSize[0] / 100)} records (${synthSize[0]}% of original)`} />
-                      {sdgTech === "stat-sdg" && (
+                      <SliderField label="Output Size" value={synthSize} onChange={setSynthSize} min={25} max={500} step={5} format={(v) => `${v}%`} helpText={`Generate ${Math.round((rawData.length || 100) * synthSize[0] / 100)} records (${synthSize[0]}% of original)`} />
+
+                      {/* ── Statistical SDG parameters ─────────────────────── */}
+                      {sdgTech === "stat-sdg" && (<>
                         <div className="flex items-center justify-between">
                           <div>
                             <Label className="text-sm">Preserve Correlations</Label>
-                            <p className="text-xs text-muted-foreground">Retain pairwise Pearson correlations during sampling</p>
+                            <p className="text-xs text-muted-foreground">Gaussian Copula — retains pairwise dependency structure</p>
                           </div>
-                          <Switch checked={preserveCorr} onCheckedChange={setPreserveCorr} />
+                          <Switch checked={preserveCorr} onCheckedChange={setPreserveCorr} data-testid="stat-sdg-preserve-corr" />
                         </div>
-                      )}
-                      {sdgTech === "dp-sdg" && (<>
-                        <SliderField label="Privacy Budget (ε)" value={epsilon} onChange={setEpsilon} min={0.1} max={10} step={0.1} format={(v) => v.toFixed(1)} helpText="ε for DP-SGD gradient clipping noise calibration" />
                         <div className="space-y-2">
-                          <Label className="text-sm">Delta (δ)</Label>
-                          <RadioGroup value={String(delta[0])} onValueChange={(v) => setDelta([parseFloat(v)])} className="flex flex-wrap gap-3">
-                            {([["1e-5","1×10⁻⁵"],["1e-6","1×10⁻⁶"]] as [string,string][]).map(([v, label]) => (
+                          <Label className="text-sm">KDE Bandwidth Rule</Label>
+                          <RadioGroup value={synthBandwidthRule} onValueChange={(v) => setSynthBandwidthRule(v as "silverman"|"scott"|"fixed")} className="flex flex-wrap gap-3">
+                            {([["silverman","Silverman"],["scott","Scott"],["fixed","Fixed"]] as [string,string][]).map(([v, label]) => (
                               <div key={v} className="flex items-center gap-1.5">
-                                <RadioGroupItem value={v} id={`sdg-delta-${v}`} />
-                                <label htmlFor={`sdg-delta-${v}`} className="text-xs font-mono cursor-pointer">{label}</label>
+                                <RadioGroupItem value={v} id={`bw-${v}`} />
+                                <label htmlFor={`bw-${v}`} className="text-xs cursor-pointer">{label}</label>
                               </div>
                             ))}
                           </RadioGroup>
+                          <p className="text-[10px] text-muted-foreground">
+                            {synthBandwidthRule === "silverman" ? "h = 0.9 × min(σ, IQR/1.34) × n⁻¹⁄⁵ — recommended for most datasets"
+                            : synthBandwidthRule === "scott" ? "h = 1.06 × σ × n⁻¹⁄⁵ — wider, better for light-tailed distributions"
+                            : "h = (max−min)/20 — fixed bins, useful for uniform-like columns"}
+                          </p>
                         </div>
-                        <SliderField label="Gradient Clipping Norm (C)" value={dpSgdClip} onChange={setDpSgdClip} min={0.1} max={5} step={0.1} format={(v) => v.toFixed(1)} helpText="Gradient clip threshold C." />
                       </>)}
+
+                      {/* ── DP-SDG parameters ──────────────────────────────── */}
+                      {sdgTech === "dp-sdg" && (() => {
+                        const N = rawData.length || 100;
+                        const B = dpSgdBatchSize;
+                        const T = dpSgdEpochs * Math.ceil(N / Math.max(1, B));
+                        const sigma = computeSigmaFromEpsilon(epsilon[0], delta[0], T, N, B);
+                        const epsActual = computeEpsilonFromSigma(sigma, delta[0], T, N, B);
+                        const puIndex = Math.max(0, Math.min(1, 1 - epsActual / 10));
+                        return (<>
+                          <SliderField label="Privacy Budget (ε)" value={epsilon} onChange={setEpsilon} min={0.1} max={10} step={0.1} format={(v) => v.toFixed(1)} helpText="Lower = stronger privacy guarantee" />
+                          <div className="space-y-2">
+                            <Label className="text-sm">Delta (δ)</Label>
+                            <RadioGroup value={String(delta[0])} onValueChange={(v) => setDelta([parseFloat(v)])} className="flex flex-wrap gap-3">
+                              {([["1e-5","1×10⁻⁵"],["1e-6","1×10⁻⁶"]] as [string,string][]).map(([v, label]) => (
+                                <div key={v} className="flex items-center gap-1.5">
+                                  <RadioGroupItem value={v} id={`sdg-delta-${v}`} />
+                                  <label htmlFor={`sdg-delta-${v}`} className="text-xs font-mono cursor-pointer">{label}</label>
+                                </div>
+                              ))}
+                            </RadioGroup>
+                          </div>
+                          <SliderField label="Gradient Clipping Norm (C)" value={dpSgdClip} onChange={setDpSgdClip} min={0.1} max={5} step={0.1} format={(v) => v.toFixed(1)} helpText="Bounds sensitivity of each sample's contribution. C = 1.0 recommended." />
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                              <Label className="text-sm">Training Epochs</Label>
+                              <Input type="number" min={50} max={1000} value={dpSgdEpochs}
+                                onChange={(e) => setDpSgdEpochs(Math.max(50, Math.min(1000, parseInt(e.target.value) || 300)))}
+                                className="h-8 text-xs font-mono" data-testid="dp-sdg-epochs" />
+                              <p className="text-[10px] text-muted-foreground">50 – 1000 epochs</p>
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-sm">Batch Size (B)</Label>
+                              <Input type="number" min={64} max={2048} value={dpSgdBatchSize}
+                                onChange={(e) => setDpSgdBatchSize(Math.max(64, Math.min(2048, parseInt(e.target.value) || 500)))}
+                                className="h-8 text-xs font-mono" data-testid="dp-sdg-batchsize" />
+                              <p className="text-[10px] text-muted-foreground">64 – 2048 records</p>
+                            </div>
+                          </div>
+
+                          {/* Live Privacy Budget Panel */}
+                          <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-3 space-y-2">
+                            <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                              <Shield className="h-3.5 w-3.5" /> Live Privacy Budget (RDP Accountant)
+                            </p>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
+                              <span className="text-muted-foreground">Target ε</span>
+                              <span className="font-semibold">{epsilon[0].toFixed(1)}</span>
+                              <span className="text-muted-foreground">Required σ</span>
+                              <span className="font-semibold text-amber-600 dark:text-amber-400">{sigma.toFixed(3)}</span>
+                              <span className="text-muted-foreground">Achieved ε</span>
+                              <span className={`font-semibold ${epsActual <= epsilon[0] * 1.05 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+                                {epsActual.toFixed(3)}
+                              </span>
+                              <span className="text-muted-foreground">Total Steps T</span>
+                              <span className="font-semibold">{T.toLocaleString()}</span>
+                              <span className="text-muted-foreground">Privacy-Utility</span>
+                              <span className="font-semibold">{(puIndex * 100).toFixed(1)}%</span>
+                            </div>
+                          </div>
+                        </>);
+                      })()}
+
+                      {/* ── Shared: Seed control ────────────────────────────── */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-sm">Fixed Random Seed</Label>
+                          <p className="text-xs text-muted-foreground">Reproducible generation across runs</p>
+                        </div>
+                        <Switch checked={synthSeedEnabled} onCheckedChange={setSynthSeedEnabled} data-testid="sdg-seed-toggle" />
+                      </div>
+                      {synthSeedEnabled && (
+                        <div className="space-y-1.5">
+                          <Label className="text-sm">Seed Value</Label>
+                          <Input type="number" value={synthSeed}
+                            onChange={(e) => setSynthSeed(parseInt(e.target.value) || 42)}
+                            className="h-8 text-xs font-mono w-32" data-testid="sdg-seed-input" />
+                        </div>
+                      )}
+
                       <RunButton running={running} onRun={handleRun} disabled={!selectedDataset || rawData.length === 0} />
                     </CardContent>
                   </Card>
