@@ -85,11 +85,21 @@ function generateTwoDistinctPrimes(bits: number, rng: () => number): [bigint, bi
   return [p, q];
 }
 
-// bits of n for each displayed key size (simulation uses smaller primes for speed)
+// Simulation prime bit-widths for browser performance.
+// IMPORTANT: these are NOT the production key sizes — the displayed keySize label is
+// the structural equivalent (Paillier n = p×q, so n_bits = 2×prime_bits).
+// Actual n bit-size is reported explicitly in all stats/reports.
 function primeBitsFor(keySize: number): number {
-  if (keySize >= 2048) return 32;   // n ≈ 64-bit  — fast but correct math
-  if (keySize >= 1024) return 26;   // n ≈ 52-bit
-  return 20;                        // n ≈ 40-bit   — instant
+  if (keySize >= 2048) return 32;   // actual n ≈ 64-bit  (structural 2048-bit equivalent)
+  if (keySize >= 1024) return 26;   // actual n ≈ 52-bit  (structural 1024-bit equivalent)
+  return 20;                        // actual n ≈ 40-bit  (structural 512-bit equivalent)
+}
+
+// Validate that a value can be safely encoded without mod-n wrap-around.
+// Safe range: |v| × PAILLIER_SCALE < n/2  (to allow signed two's-complement representation)
+function isSafeToEncode(v: number, n: bigint): boolean {
+  const scaled = BigInt(Math.round(Math.abs(v) * Number(PAILLIER_SCALE)));
+  return scaled < n / 2n;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -169,25 +179,41 @@ export function applyHomomorphicEncryption(
   const rng   = makePRNG(Date.now() ^ 0x1A2B3C4D);
   const bits  = primeBitsFor(keySize);
   const keys  = paillierKeyGen(bits, rng);
+  // Actual n bit-size (may differ slightly from bits*2 due to prime generation variability)
+  const actualNBits = keys.n.toString(2).length;
 
-  // Precompute a single random r (coprime to n) and r^n mod n²
-  // Using r coprime to n: any 1..n-1 works since n=pq and random r is unlikely divisible by p or q
+  // ── Issue 2 fix: Per-column plaintext overflow guard ─────────────────────────
+  // Safe encoding range: |v| × 1000 < n/2  (signed two's-complement mod n).
+  // Columns where any value exceeds this bound would silently wrap mod n, producing
+  // incorrect homomorphic sums with no error signal — they are excluded entirely.
+  const N = Math.min(data.length, 500);
+  const subset = data.slice(0, N);
+
+  const overflowCols: string[] = [];
+  const safeCols: string[] = [];
+  for (const col of encCols) {
+    const vals = subset.map((row) => Number(row[col])).filter((v) => !isNaN(v));
+    const maxAbs = vals.length > 0 ? Math.max(...vals.map(Math.abs)) : 0;
+    if (isSafeToEncode(maxAbs, keys.n)) {
+      safeCols.push(col);
+    } else {
+      overflowCols.push(col);
+    }
+  }
+  const safeEncCols = safeCols;  // only encrypt columns that pass the range check
+
+  // Generate a random blinding factor r coprime to n
   let r: bigint;
   do { r = randBigInt(bits - 1, rng) % (keys.n - 1n) + 1n; }
   while (gcd(r, keys.n) !== 1n);
-  const rn = modpow(r, keys.n, keys.n2);  // precomputed r^n mod n²
 
   // Build per-column encode/decrypt demo
   const colStats: Record<string, Record<string, string | number>> = {};
 
-  // Process up to first 500 rows (simulation cap for performance)
-  const N = Math.min(data.length, 500);
-  const subset = data.slice(0, N);
-
-  // Encrypt each row
+  // Encrypt each row (safe columns only)
   const processed: DataRow[] = subset.map((row) => {
     const newRow: DataRow = { ...row };
-    for (const col of encCols) {
+    for (const col of safeEncCols) {
       const v = Number(row[col]);
       if (!isNaN(v)) {
         const m  = encodeFloat(v, keys.n);
@@ -199,16 +225,19 @@ export function applyHomomorphicEncryption(
     return newRow;
   });
 
-  // Demonstrate homomorphic sum on first encrypted column
-  const demoCol = encCols[0];
-  const origVals = subset.map((r) => Number(r[demoCol])).filter((v) => !isNaN(v));
+  // Demonstrate homomorphic sum on first SAFE column (overflow cols excluded)
+  const demoCol  = safeEncCols[0] ?? encCols[0];
+  const origVals = subset.map((row) => Number(row[demoCol])).filter((v) => !isNaN(v));
   const origSum  = origVals.reduce((s, v) => s + v, 0);
 
-  // Encrypt each value and multiply ciphertexts (homomorphic sum)
-  const ciphertexts = origVals.map((v) => paillierEncrypt(encodeFloat(v, keys.n), keys, r));
-  const cipherSum   = ciphertexts.reduce((acc, c) => paillierHAdd(acc, c, keys.n2), 1n);
-  const decSum      = decodeFloat(paillierDecrypt(cipherSum, keys), keys.n);
-  const roundTrip   = Math.abs(decSum - origSum) < 0.5;  // allow 0.5 rounding
+  // Encrypt each value and multiply ciphertexts (homomorphic sum) — only valid for safe columns
+  let roundTrip = false, decSum = 0;
+  if (safeEncCols.length > 0) {
+    const ciphertexts = origVals.map((v) => paillierEncrypt(encodeFloat(v, keys.n), keys, r));
+    const cipherSum   = ciphertexts.reduce((acc, c) => paillierHAdd(acc, c, keys.n2), 1n);
+    decSum    = decodeFloat(paillierDecrypt(cipherSum, keys), keys.n);
+    roundTrip = Math.abs(decSum - origSum) < 0.5;
+  }
 
   // Verify individual decrypt on one sample
   const sampleV   = origVals[0] ?? 0;
@@ -216,28 +245,41 @@ export function applyHomomorphicEncryption(
   const sampleDec = decodeFloat(paillierDecrypt(sampleEnc, keys), keys.n);
   const decOk     = Math.abs(sampleDec - sampleV) < 0.001;
 
-  // Per-column colStats
-  for (const col of encCols) {
-    const vals  = subset.map((r) => Number(r[col])).filter((v) => !isNaN(v));
+  // Per-column colStats (safe cols only — overflow cols marked separately)
+  for (const col of safeEncCols) {
+    const vals  = subset.map((row) => Number(row[col])).filter((v) => !isNaN(v));
     const mean  = vals.reduce((s, v) => s + v, 0) / (vals.length || 1);
     const min   = Math.min(...vals);
     const max   = Math.max(...vals);
     colStats[col] = {
-      "Count":          vals.length,
-      "Original Mean":  mean.toFixed(4),
-      "Min":            min.toFixed(4),
-      "Max":            max.toFixed(4),
-      "Ciphertext Size":`${(bits * 2 / 8)} bytes (sim)`,
-      "Encryption":     "✓ Paillier",
+      "Count":           vals.length,
+      "Original Mean":   mean.toFixed(4),
+      "Min":             min.toFixed(4),
+      "Max":             max.toFixed(4),
+      "Max |v|×1000":    (Math.max(...vals.map(Math.abs)) * 1000).toFixed(0),
+      "Encoding Safe":   "✓ |v|×1000 < n/2",
+      "Ciphertext Size": `${Math.ceil(actualNBits / 4)} hex chars (actual n=${actualNBits}-bit)`,
+      "Encryption":      "✓ Paillier",
+    };
+  }
+  for (const col of overflowCols) {
+    const vals  = subset.map((row) => Number(row[col])).filter((v) => !isNaN(v));
+    const maxAbs = vals.length > 0 ? Math.max(...vals.map(Math.abs)) : 0;
+    colStats[col] = {
+      "Count":         vals.length,
+      "Max |v|×1000":  (maxAbs * 1000).toFixed(0),
+      "n/2 (safe bound)": (Number(keys.n / 2n)).toFixed(0),
+      "Encoding Safe": "⚠ OVERFLOW — col skipped (|v|×1000 ≥ n/2 would silently wrap)",
+      "Encryption":    "— skipped",
     };
   }
 
-  const keyBits   = bits * 2;  // n = p×q
   const nHex      = keys.n.toString(16);
   const lambdaHex = keys.lambda.toString(16);
 
   const report = buildHEReport({
-    keySize, keyBits, encCols, N, origSum, decSum, roundTrip, decOk,
+    keySize, actualNBits, encCols: safeEncCols, overflowCols, N,
+    origSum, decSum, roundTrip, decOk,
     sampleV, sampleDec, nHex, lambdaHex,
     colStats,
   });
@@ -249,31 +291,51 @@ export function applyHomomorphicEncryption(
     originalCount: data.length,
     processedCount: N,
     recordsSuppressed: 0,
-    informationLoss: 1.0,  // data is fully encrypted — not analysable without private key
+    // Issue 3: 100% info loss is correct and expected for encryption — it is NOT a
+    // negative metric here. It means individual records are opaque; only aggregate
+    // HE operations (sum, mean) are revealed when the aggregated ciphertext is decrypted.
+    informationLoss: 1.0,
     executionMs: Math.round(performance.now() - t0),
     stats: {
-      "Key Size (simulated)":    `${keySize}-bit`,
-      "Internal Prime Bits":     `${bits}-bit primes (p, q)`,
+      // Issue 1: show ACTUAL n bit size, not the misleading structural keySize label
+      "Structural Key Size":     `${keySize}-bit (requested)`,
+      "Actual n Bit-Size":       `${actualNBits}-bit (simulation — NOT ${keySize}-bit security)`,
+      "Simulation Prime Bits":   `${bits}-bit p, ${bits}-bit q → n = p×q = ${actualNBits}-bit`,
       "Public Key n (hex)":      nHex.slice(0, 16) + "…",
       "λ = lcm(p−1, q−1) (hex)": lambdaHex.slice(0, 16) + "…",
       "g = n + 1":               "✓ (Paillier simplification)",
       "μ = λ⁻¹ mod n":          "✓ computed",
-      "Homomorphic Sum Check":   roundTrip ? "✓ PASS — E(Σmᵢ) = ΠE(mᵢ) mod n²" : "⚠ Rounding drift",
+      "Homomorphic Sum Check":   roundTrip ? "✓ PASS — E(Σmᵢ) = ΠE(mᵢ) mod n²" : (safeEncCols.length === 0 ? "— no safe cols" : "⚠ Rounding drift"),
       "Decrypt Round-Trip":      decOk     ? "✓ PASS" : "⚠ mismatch",
-      "Encrypted Columns":       encCols.length,
+      "Safe Encrypted Columns":  safeEncCols.length,
+      "Overflow Columns Skipped":overflowCols.length > 0 ? overflowCols.join(", ") : "none",
       "Rows Processed":          N,
-      "Privacy Guarantee":       "IND-CPA (simulation — educational)",
+      // Issue 1: removed false "IND-CPA" claim — only structural properties hold in simulation
+      "Security (Simulation)":   `IND-CPA structure only — actual n=${actualNBits}-bit is NOT computationally secure`,
+      // Issue 3: clarify what 100% info loss means in HE context
+      "Information Loss":        "100% (expected) — ciphertexts are opaque; only aggregate HE operations reveal anything",
     },
     warnings: [
-      "This is an educational simulation of Paillier HE using reduced-size primes for browser performance.",
-      "Production Paillier requires true 2048-bit primes and server-side key management.",
-      "Encrypted values are stored as hex-prefixed strings in the output — they cannot be analysed without the private key.",
+      `⚠ Simulation uses ${bits}-bit primes → actual n=${actualNBits}-bit (NOT ${keySize}-bit). IND-CPA security requires n≥2048-bit in production.`,
+      "This is an educational demonstration of Paillier HE structural properties only.",
+      "Production Paillier requires true 2048-bit primes, HSM key management, and server-side execution.",
+      "100% information loss is the CORRECT outcome for encryption — individual records are inaccessible without the private key. HE benefit: aggregate queries (sum, mean) can be answered from ciphertexts alone.",
+      ...(overflowCols.length > 0
+        ? [`⚠ Column(s) skipped due to plaintext overflow: ${overflowCols.join(", ")} — |v|×1000 ≥ n/2 would cause silent mod-n wrap in homomorphic sums.`]
+        : []),
     ],
     colStats,
-    interpretation: `Paillier HE encrypts ${encCols.length} numeric column(s) using a ${keySize}-bit simulated keypair. ` +
-      `The homomorphic sum property was ${roundTrip ? "verified ✓" : "tested ⚠"}: ` +
-      `Π E(mᵢ) mod n² decrypts to Σ mᵢ = ${origSum.toFixed(3)} (decoded: ${decSum.toFixed(3)}).`,
-    compliancePassed: roundTrip && decOk,
+    // Issue 3: compliance is for HE property verification, NOT privacy enhancement metric
+    interpretation:
+      `Paillier HE structural properties verified on ${safeEncCols.length} column(s) using ${actualNBits}-bit n ` +
+      `(simulation of ${keySize}-bit structure). ` +
+      `Homomorphic sum: Π E(mᵢ) mod n² decrypts to ${origSum.toFixed(3)} ` +
+      `(decoded: ${decSum.toFixed(3)}) — ${roundTrip ? "VERIFIED ✓" : "UNVERIFIED ⚠"}. ` +
+      `100% information loss is expected and correct: HE is a confidentiality control — ` +
+      `only aggregate ciphertext operations (sum, mean) are exposed, not individual records.` +
+      (overflowCols.length > 0 ? ` ${overflowCols.length} column(s) excluded: values exceed safe encoding range for ${actualNBits}-bit n.` : ""),
+    // HE compliance = homomorphic properties verified + no overflow columns present
+    compliancePassed: roundTrip && decOk && overflowCols.length === 0,
     report,
   };
 }
@@ -459,7 +521,11 @@ export function applySMPC(
 // ══════════════════════════════════════════════════════════════════════════════
 
 interface HEReportParams {
-  keySize: number; keyBits: number; encCols: string[]; N: number;
+  keySize: number;
+  actualNBits: number;   // Issue 1: actual n bit-size, not the structural keySize
+  encCols: string[];     // safe (encrypted) columns only
+  overflowCols: string[]; // Issue 2: columns excluded due to overflow
+  N: number;
   origSum: number; decSum: number; roundTrip: boolean; decOk: boolean;
   sampleV: number; sampleDec: number;
   nHex: string; lambdaHex: string;
@@ -467,12 +533,23 @@ interface HEReportParams {
 }
 
 function buildHEReport(p: HEReportParams): string {
-  const now    = new Date().toLocaleString("en-IN");
-  const pass   = p.roundTrip && p.decOk;
-  const badge  = pass ? "✅ COMPLIANT" : "⚠ SIMULATION ONLY";
-  const colRows = p.encCols.map((c) => {
+  const now  = new Date().toLocaleString("en-IN");
+  const heOk = p.roundTrip && p.decOk && p.overflowCols.length === 0;
+  // Issue 1 + 3: badge is "HE PROPERTIES VERIFIED" not "COMPLIANT"; never claim IND-CPA for sim
+  const badge = heOk
+    ? "✅ HE PROPERTIES VERIFIED (Educational Simulation)"
+    : (p.overflowCols.length > 0 ? "⚠ OVERFLOW DETECTED — Some Columns Skipped" : "⚠ PROPERTY CHECK FAILED");
+  const badgeBg    = heOk ? "#dcfce7" : "#fef9c3";
+  const badgeColor = heOk ? "#166534" : "#854d0e";
+
+  const safeColRows = p.encCols.map((c) => {
     const s = p.colStats[c] ?? {};
-    return `<tr><td><b>${c}</b></td><td>${s["Count"]}</td><td>${s["Original Mean"]}</td><td>${s["Ciphertext Size"]}</td></tr>`;
+    return `<tr><td><b>${c}</b></td><td>${s["Count"]}</td><td>${s["Original Mean"]}</td><td>${s["Max |v|×1000"] ?? "—"}</td><td>✓ Safe</td><td>${s["Ciphertext Size"] ?? "—"}</td></tr>`;
+  }).join("\n");
+
+  const overflowRows = p.overflowCols.map((c) => {
+    const s = p.colStats[c] ?? {};
+    return `<tr style="background:#fef2f2"><td><b>${c}</b></td><td>${s["Count"]}</td><td>—</td><td>${s["Max |v|×1000"] ?? "—"}</td><td>⚠ OVERFLOW</td><td>— skipped</td></tr>`;
   }).join("\n");
 
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -481,7 +558,8 @@ function buildHEReport(p: HEReportParams): string {
   body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;color:#1e293b;background:#f8fafc}
   h1{color:#1d4ed8;border-bottom:3px solid #1d4ed8;padding-bottom:8px}
   h2{color:#1e40af;margin-top:28px}
-  .badge{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:bold;font-size:13px;background:${pass ? "#dcfce7" : "#fef9c3"};color:${pass ? "#166534" : "#854d0e"}}
+  .badge{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:bold;font-size:13px;background:${badgeBg};color:${badgeColor}}
+  .warn{background:#fffbeb;border-left:4px solid #f59e0b;padding:10px 14px;border-radius:4px;margin:10px 0;font-size:13px}
   table{border-collapse:collapse;width:100%;margin:12px 0}
   th{background:#1d4ed8;color:#fff;padding:8px 12px;text-align:left}
   td{padding:7px 12px;border-bottom:1px solid #e2e8f0}
@@ -494,42 +572,59 @@ function buildHEReport(p: HEReportParams): string {
 <div class="section">
   <p><b>Generated:</b> ${now}</p>
   <p><b>System:</b> SafeData Pipeline — Ministry of Electronics &amp; IT, Government of India</p>
-  <p><b>Methodology:</b> NIST SP 800-175B Cryptographic Standards — Paillier HE (educational simulation)</p>
+  <p><b>Methodology:</b> NIST SP 800-175B Cryptographic Standards — Paillier PHE (educational simulation)</p>
   <p><b>Status:</b> <span class="badge">${badge}</span></p>
+  <div class="warn">⚠ <b>Simulation Disclaimer:</b> This run uses ${p.actualNBits}-bit n (actual security level).
+  The structural label "${p.keySize}-bit" refers to the Paillier key size convention (n = p×q),
+  but the simulation primes are reduced for browser performance. 
+  <b>IND-CPA security requires n ≥ 2048-bit in production.</b> This output is for educational demonstration only.</div>
 </div>
 
 <h2>§1  Executive Summary</h2>
 <div class="section">
-  <p>Paillier Partially-Homomorphic Encryption (PHE) was applied to <b>${p.encCols.length} numeric column(s)</b> across 
-  <b>${p.N} records</b> using a simulated <b>${p.keySize}-bit keypair</b>. The homomorphic sum property
-  was <b>${p.roundTrip ? "verified ✓" : "NOT verified ⚠"}</b>: multiplying all individual ciphertexts yields a 
-  ciphertext that decrypts to the plaintext sum.</p>
+  <p>Paillier Partially-Homomorphic Encryption (PHE) structural properties were demonstrated on
+  <b>${p.encCols.length} safe column(s)</b> across <b>${p.N} records</b> using a 
+  <b>${p.actualNBits}-bit n</b> (simulation of ${p.keySize}-bit structure).
+  ${p.overflowCols.length > 0
+    ? `<b>${p.overflowCols.length} column(s) excluded</b> — values would exceed the safe encoding range
+       (|v|×1000 ≥ n/2) and would silently wrap mod n, producing incorrect homomorphic sums.`
+    : "All selected columns passed the plaintext range check."}</p>
+  <p>The homomorphic sum property was <b>${p.roundTrip ? "verified ✓" : (p.encCols.length === 0 ? "not tested (no safe columns)" : "NOT verified ⚠")}</b>.</p>
+  <p><b>Information Loss = 100%</b> — this is the <em>correct and expected</em> outcome for encryption.
+  Ciphertexts are computationally opaque. The HE benefit is that aggregate queries (SUM, MEAN) 
+  can be answered by operating on ciphertexts directly — only the aggregate result is decrypted, 
+  not individual records. Encryption is a <em>confidentiality control</em>, not a de-identification technique.</p>
 </div>
 
-<h2>§2  Key Generation Parameters</h2>
+<h2>§2  Key Generation Parameters (Actual Values)</h2>
 <div class="section">
   <div class="formula">
-    Key generation:  n = p × q<br>
+    Key generation:  n = p × q  (actual n = ${p.actualNBits}-bit)<br>
     λ = lcm(p−1, q−1)<br>
-    g = n + 1   (Paillier simplification)<br>
+    g = n + 1   (Paillier simplification: (n+1)^m ≡ 1 + mn mod n²)<br>
     μ = λ⁻¹ mod n   (decryption exponent)
   </div>
   <table>
     <tr><th>Parameter</th><th>Value</th></tr>
-    <tr><td>Simulated Key Size</td><td>${p.keySize}-bit (n = p×q)</td></tr>
-    <tr><td>n (public, hex)</td><td class="mono">${p.nHex}</td></tr>
+    <tr><td>Structural Key Size (label)</td><td>${p.keySize}-bit</td></tr>
+    <tr><td><b>Actual n Bit-Size (simulation)</b></td><td><b>${p.actualNBits}-bit — NOT ${p.keySize}-bit security</b></td></tr>
+    <tr><td>n (public, full hex)</td><td class="mono">${p.nHex}</td></tr>
     <tr><td>λ (private, hex prefix)</td><td class="mono">${p.lambdaHex.slice(0,24)}…</td></tr>
     <tr><td>g</td><td>n + 1</td></tr>
-    <tr><td>Security Model</td><td>IND-CPA (semantic security)</td></tr>
+    <tr><td>Security Model</td><td>IND-CPA structure (educational) — actual n=${p.actualNBits}-bit is NOT computationally secure</td></tr>
   </table>
 </div>
 
-<h2>§3  Encryption Formula</h2>
+<h2>§3  Encryption &amp; Encoding</h2>
 <div class="section">
-  <div class="formula">c = (1 + m·n) · rⁿ mod n²</div>
-  <p>Where <em>m</em> is the encoded plaintext (m = round(v × 1000) mod n), and <em>r</em> is a random 
-  blinding factor coprime to n. The <code>g = n+1</code> simplification uses the identity 
-  <code>(n+1)^m ≡ 1 + mn (mod n²)</code>.</p>
+  <div class="formula">
+    Encoding:    m = round(v × 1000) mod n   [3 decimal places of precision]<br>
+    Safe range:  |v| × 1000 &lt; n/2   (otherwise mod-n wrap produces incorrect sums)<br>
+    Encryption:  c = (1 + m·n) · rⁿ mod n²   [r coprime to n, r ∈ (1, n−1)]
+  </div>
+  <p>The encoding uses signed two's-complement mod n: values above n/2 are interpreted as negative.
+  Any value where |v|×1000 ≥ n/2 would silently wrap, corrupting homomorphic sums — 
+  those columns are excluded with an explicit warning.</p>
 </div>
 
 <h2>§4  Decryption Verification</h2>
@@ -538,54 +633,78 @@ function buildHEReport(p: HEReportParams): string {
   <table>
     <tr><th>Test</th><th>Original</th><th>Decrypted</th><th>Status</th></tr>
     <tr><td>Sample round-trip</td><td>${p.sampleV}</td><td>${p.sampleDec.toFixed(3)}</td><td>${p.decOk ? "✅ PASS" : "⚠ FAIL"}</td></tr>
-    <tr><td>Homomorphic sum</td><td>${p.origSum.toFixed(3)}</td><td>${p.decSum.toFixed(3)}</td><td>${p.roundTrip ? "✅ PASS" : "⚠ FAIL"}</td></tr>
+    <tr><td>Homomorphic sum (Σ)</td><td>${p.origSum.toFixed(3)}</td><td>${p.decSum.toFixed(3)}</td><td>${p.roundTrip ? "✅ PASS" : (p.encCols.length === 0 ? "— skipped" : "⚠ FAIL")}</td></tr>
   </table>
 </div>
 
 <h2>§5  Homomorphic Property Demonstration</h2>
 <div class="section">
-  <div class="formula">E(m₁) · E(m₂) ≡ E(m₁ + m₂)  (mod n²)</div>
-  <p>This additive homomorphism enables aggregate queries (SUM, MEAN, COUNT) to be computed
-  directly on encrypted data without ever decrypting individual records.</p>
-  <p><b>Demonstrated:</b> E(Σ mᵢ) = Π E(mᵢ) mod n² — verified on ${p.N} records. 
-  Original sum = <b>${p.origSum.toFixed(4)}</b>, decrypted sum = <b>${p.decSum.toFixed(4)}</b>.</p>
+  <div class="formula">E(m₁) · E(m₂) ≡ E(m₁ + m₂)  (mod n²)   [additive HE]</div>
+  <p>This additive homomorphism enables aggregate queries (SUM, MEAN) to be computed
+  directly on ciphertexts — <b>individual records are never decrypted</b>. 
+  Only the final aggregate ciphertext is decrypted to reveal the result.</p>
+  <p><b>Verified:</b> Π E(mᵢ) mod n² decrypts to Σ mᵢ = <b>${p.origSum.toFixed(4)}</b> 
+  (decoded: <b>${p.decSum.toFixed(4)}</b>) on ${p.N} records.</p>
 </div>
 
-<h2>§6  Column-Level Encryption Summary</h2>
+<h2>§6  Column Encoding Safety Check</h2>
 <div class="section">
   <table>
-    <tr><th>Column</th><th>Count</th><th>Original Mean</th><th>Ciphertext Size</th></tr>
-    ${colRows}
+    <tr><th>Column</th><th>Count</th><th>Mean</th><th>Max |v|×1000</th><th>Range Check</th><th>Ciphertext</th></tr>
+    ${safeColRows}
+    ${overflowRows}
   </table>
+  ${p.overflowCols.length > 0
+    ? `<div class="warn">⚠ ${p.overflowCols.length} column(s) excluded: <b>${p.overflowCols.join(", ")}</b> — 
+       max encoded value ≥ n/2 = ${Math.floor(parseInt(p.nHex, 16) / 2)} (approx). 
+       Encrypting these would produce silent mod-n wrapping in homomorphic sums.</div>`
+    : "<p>✓ All columns passed the plaintext range check.</p>"}
 </div>
 
-<h2>§7  Privacy Guarantee</h2>
+<h2>§7  Security Analysis (Honest Assessment)</h2>
 <div class="section">
-  <p><b>IND-CPA Security:</b> Any probabilistic polynomial-time adversary cannot distinguish 
-  encryptions of two chosen messages with non-negligible advantage.</p>
-  <p><b>Semantic Security:</b> Individual ciphertexts reveal zero information about the plaintext 
-  without the private key λ.</p>
-  <p><b>Homomorphic Operations:</b> Addition (and scalar multiplication) are supported without decryption. 
-  Multiplication of plaintexts requires bootstrapping (not supported in basic Paillier).</p>
-  <p><em>Note: This is an educational simulation. Production deployment requires true 2048-bit primes, 
-  HSM-based key management, and server-side execution.</em></p>
+  <p><b>What this simulation demonstrates:</b> The structural correctness of Paillier's additive 
+  homomorphism — encrypt → compute on ciphertexts → decrypt aggregate only.</p>
+  <p><b>What this simulation does NOT provide:</b> Computational security. With n=${p.actualNBits}-bit, 
+  the public modulus n can be factored in seconds, revealing p and q and thus λ and μ. 
+  The IND-CPA security proof for Paillier requires the Decisional Composite Residuosity (DCR) 
+  assumption, which holds only for n ≥ 2048-bit in practice.</p>
+  <p><b>Homomorphic Operations Supported:</b> Addition E(m₁+m₂) = E(m₁)·E(m₂) mod n²; 
+  scalar multiply E(k·m) = E(m)^k mod n². Plaintext multiplication requires FHE.</p>
 </div>
 
-<h2>§8  Compliance Assessment</h2>
+<h2>§8  Information Loss Clarification</h2>
 <div class="section">
-  <p><b>NIST SP 800-175B:</b> Paillier HE is an approved cryptographic primitive for data confidentiality.</p>
-  <p><b>Data Protection Act (India) 2023:</b> Encryption satisfies the "appropriate technical safeguards" 
-  requirement for personal data protection.</p>
+  <p><b>Information Loss = 100%</b> is the correct and desired outcome for encryption. It means:</p>
+  <ul>
+    <li>Individual ciphertexts reveal zero information about plaintexts (without the private key λ).</li>
+    <li>This is NOT a privacy-preserving analytics technique in the traditional sense — 
+        it is a <b>confidentiality control</b>.</li>
+    <li>The HE benefit: an analyst can compute SUM or MEAN by multiplying ciphertexts, 
+        then decrypting only the aggregate — individual records remain private.</li>
+    <li>100% information loss does not mean the data is "destroyed" — it means the 
+        output dataset (ciphertexts) cannot be analysed without the private key.</li>
+  </ul>
+</div>
+
+<h2>§9  Compliance Assessment</h2>
+<div class="section">
+  <p><b>NIST SP 800-175B:</b> Paillier PHE implements an approved cryptographic structure. 
+  Production deployment requires 2048-bit n and HSM-based key management.</p>
+  <p><b>India DPDP Act 2023:</b> Encryption satisfies "appropriate technical safeguards" 
+  for personal data confidentiality — but not as a substitute for anonymisation/de-identification 
+  unless the HE aggregate workflow is used (encrypt → compute → decrypt aggregate only).</p>
   <p><b>Overall Status:</b> <span class="badge">${badge}</span></p>
 </div>
 
-<h2>§9  Limitations &amp; Recommendations</h2>
+<h2>§10  Limitations &amp; Recommendations</h2>
 <div class="section">
   <ul>
-    <li>This simulation uses reduced-size primes (${p.keyBits}-bit n) for browser performance; production requires 2048-bit n.</li>
-    <li>Key management: private key (λ, μ) must be stored in an HSM or secure key vault.</li>
-    <li>Only additive homomorphism is demonstrated; multiplicative operations require levelled FHE.</li>
-    <li>Ciphertext expansion: each value grows from ~8 bytes to ~${Math.ceil(p.keyBits / 4)} hex chars.</li>
+    <li><b>Prime size:</b> Simulation uses ${p.actualNBits}-bit n (NOT ${p.keySize}-bit). Production requires 2048-bit n minimum.</li>
+    <li><b>Plaintext range:</b> Encoding is safe only for |v|×1000 &lt; n/2. Columns exceeding this bound are excluded.</li>
+    <li><b>Key management:</b> Private key (λ, μ) must be stored in an HSM or secure key vault — never in the browser.</li>
+    <li><b>Ciphertext expansion:</b> Each value grows from ~8 bytes to ~${Math.ceil(p.actualNBits / 4)} hex chars (${p.actualNBits}-bit n).</li>
+    <li><b>Operations:</b> Only additive homomorphism is demonstrated; multiplication requires levelled/bootstrapped FHE.</li>
   </ul>
 </div>
 </body></html>`;
