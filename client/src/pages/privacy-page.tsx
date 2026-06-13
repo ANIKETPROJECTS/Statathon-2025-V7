@@ -229,32 +229,30 @@ function ResultCard({ result }: { result: PrivacyResult }) {
       </div>
 
       {result.colStats && Object.keys(result.colStats).length > 0 && (
-        <div className="rounded-lg border overflow-hidden">
+        <div className="rounded-lg border overflow-hidden min-w-0">
           <div className="bg-muted/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Per-Column Statistics</div>
-          <ScrollArea className="h-[200px]">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b bg-muted/20">
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">Column</th>
-                    {Object.values(result.colStats)[0] && Object.keys(Object.values(result.colStats)[0]).map((metric) => (
-                      <th key={metric} className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">{metric}</th>
+          <div className="h-[200px] overflow-auto">
+            <table className="text-xs border-collapse" style={{ minWidth: "100%" }}>
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b bg-muted/20">
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap bg-muted/20">Column</th>
+                  {Object.values(result.colStats)[0] && Object.keys(Object.values(result.colStats)[0]).map((metric) => (
+                    <th key={metric} className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap bg-muted/20">{metric}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(result.colStats).map(([col, metrics]) => (
+                  <tr key={col} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="px-3 py-1.5 font-medium whitespace-nowrap">{col}</td>
+                    {Object.values(metrics).map((v, mi) => (
+                      <td key={mi} className="px-3 py-1.5 font-mono text-right whitespace-nowrap">{String(v)}</td>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(result.colStats).map(([col, metrics]) => (
-                    <tr key={col} className="border-b last:border-0 hover:bg-muted/30">
-                      <td className="px-3 py-1.5 font-medium whitespace-nowrap">{col}</td>
-                      {Object.values(metrics).map((v, mi) => (
-                        <td key={mi} className="px-3 py-1.5 font-mono text-right whitespace-nowrap">{String(v)}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </ScrollArea>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -270,33 +268,31 @@ function ResultCard({ result }: { result: PrivacyResult }) {
       )}
 
       {result.processedData.length > 0 && (
-        <div className="rounded-lg border overflow-hidden">
+        <div className="rounded-lg border overflow-hidden min-w-0">
           <div className="bg-muted/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center justify-between">
             <span>Sample Output (first 5 records)</span>
             <Badge variant="outline" className="text-xs">{result.processedData.length} records</Badge>
           </div>
-          <ScrollArea className="h-[160px]">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b">
+          <div className="h-[160px] overflow-auto">
+            <table className="text-xs border-collapse" style={{ minWidth: "100%" }}>
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b bg-background">
+                  {Object.keys(result.processedData[0]).slice(0, 8).map((col) => (
+                    <th key={col} className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap bg-background">{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {result.processedData.slice(0, 5).map((row, i) => (
+                  <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
                     {Object.keys(result.processedData[0]).slice(0, 8).map((col) => (
-                      <th key={col} className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">{col}</th>
+                      <td key={col} className="px-3 py-1.5 font-mono whitespace-nowrap">{String(row[col] ?? "")}</td>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
-                  {result.processedData.slice(0, 5).map((row, i) => (
-                    <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
-                      {Object.keys(result.processedData[0]).slice(0, 8).map((col) => (
-                        <td key={col} className="px-3 py-1.5 font-mono whitespace-nowrap">{String(row[col] ?? "")}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </ScrollArea>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
