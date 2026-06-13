@@ -48,8 +48,10 @@ function buildSchema(data: DataRow[]): DataSchema {
     if (numeric) {
       const vals = data.map((r) => Number(r[name])).filter((v) => !isNaN(v));
       if (vals.length === 0) continue;
-      const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
-      const std  = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length) || 1;
+      const mean   = vals.reduce((s, v) => s + v, 0) / vals.length;
+      const rawStd = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
+      if (rawStd === 0) continue;  // skip constant/blank columns — z-score is undefined (σ=0), gradients are meaningless
+      const std = rawStd;
       const min  = Math.min(...vals);
       const max  = Math.max(...vals);
       cols.push({ name, type: "numeric", mean, std, categories: [], min, max });
@@ -190,11 +192,12 @@ function batchGrad(
   for (const x of batch) {
     const { acts, pres } = forwardAll(model, x);
     const out = acts[nL];
-    // MSE loss
-    loss += out.reduce((s, v, i) => s + (v - x[i]) ** 2, 0) / (2 * N * x.length);
+    // MSE loss: mean over batch, sum over dims — gives gradients of proper magnitude
+    // Dividing by (N*d) was making gradients ~d× too small, causing near-zero weight updates
+    loss += out.reduce((s, v, i) => s + (v - x[i]) ** 2, 0) / (2 * N);
 
-    // dL/dOutput = (out - x) / (N * d)
-    let dOut = out.map((v, i) => (v - x[i]) / (N * x.length));
+    // dL/dOutput = (out - x) / N  (mean over batch only, NOT divided by input dim)
+    let dOut = out.map((v, i) => (v - x[i]) / N);
 
     for (let li = nL - 1; li >= 0; li--) {
       const relu = li < nL - 1;
@@ -542,7 +545,7 @@ export function applyFederatedLearning(
       "This simulation runs all nodes in the same browser environment for demonstration purposes.",
       ...(dp
         ? [`DP-FedAvg adds Gaussian noise σ=${sigmaCalibrated.toFixed(3)} (calibrated) to aggregated updates.`]
-        : []),
+        : ["⚠ No formal DP guarantee — FedAvg provides data locality only. Enable DP-FedAvg to satisfy India DPDP Act 2023 §8(4) differential privacy requirements."]),
       ...(partition === "noniid"
         ? ["Non-IID partition may slow convergence — increase rounds T if loss does not decrease."]
         : []),
@@ -554,7 +557,9 @@ export function applyFederatedLearning(
       (dp ? `DP-FedAvg applies gradient clipping C=${clipC} and Gaussian noise σ=${sigmaCalibrated.toFixed(3)}, ` +
             `achieving (ε=${epsilonActual.toFixed(2)}, δ=${dp.delta})-DP. ` : "") +
       (generateSynthetic ? `Synthetic output: ${processed.length} records sampled from decoder.` : ""),
-    compliancePassed: lastLoss < firstLoss || firstLoss === 0,
+    // DP compliance requires both: (a) model converged AND (b) DP-FedAvg was enabled
+    // FedAvg without DP satisfies data locality only — not DPDP Act §8(4) formal DP requirement
+    compliancePassed: dp !== null && (lastLoss < firstLoss || firstLoss === 0),
     report,
   };
 }
@@ -578,8 +583,17 @@ interface FLReportParams {
 
 function buildFLReport(p: FLReportParams): string {
   const now   = new Date().toLocaleString("en-IN");
-  const pass  = p.lastLoss < p.firstLoss || p.firstLoss === 0;
-  const badge = pass ? "✅ CONVERGED" : "⚠ CHECK CONVERGENCE";
+  // Require ≥2% loss improvement to call convergence genuine (Issue 1: 1.2% plateau ≠ true convergence)
+  const pctImprove = p.firstLoss > 0 ? (p.firstLoss - p.lastLoss) / p.firstLoss * 100 : 0;
+  const converged  = p.firstLoss > 0 && pctImprove >= 2;
+  const dpActive   = p.dp !== null;
+  // pass drives the green/yellow badge colour
+  const pass  = converged && dpActive;
+  const badge = converged
+    ? (dpActive
+        ? `✅ CONVERGED — DP-FedAvg Active (${pctImprove.toFixed(1)}% loss improvement)`
+        : `⚠ CONVERGED (${pctImprove.toFixed(1)}% loss ↓) — No Formal DP Guarantee`)
+    : `⚠ NOT CONVERGED (${pctImprove.toFixed(1)}% improvement < 2% threshold) — Increase Rounds or Learning Rate`;
   const { H1, H2, Z } = SIM_DIMS;
   const specH1 = 128, specH2 = 64, specZ = 32;
 
