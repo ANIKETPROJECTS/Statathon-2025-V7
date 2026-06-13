@@ -1,0 +1,16 @@
+Based on the screenshots, here are the mathematical issues for Synthetic Data Generation methods only:
+
+**Issue 1 — Batch Size Larger Than Dataset [DP-SDG / DP-CTGAN via DP-SGD]**
+Batch Size = 500 but dataset N = 100. In DP-SGD, the sampling probability q = B/N = 500/100 = 5.0, which exceeds 1.0. This is mathematically undefined — Poisson subsampling requires q ≤ 1. The privacy accounting (RDP composition) is invalid when q > 1, meaning the achieved ε=1.0 claim cannot be trusted.
+
+**Issue 2 — Total Steps = Epochs, Not Epochs × Batches [DP-SDG / DP-CTGAN via DP-SGD]**
+With N=100 and B=500, there is only 1 batch per epoch, so Total Steps = 300 × 1 = 300. The RDP accountant computes privacy cost over T steps. With only 300 steps instead of the expected thousands, the noise multiplier σ=84.9 was calibrated for far fewer gradient updates than a real CTGAN would require, making the privacy-utility tradeoff calculation incorrect.
+
+**Issue 3 — Simulated Steps = Total Steps (No Real GAN Training) [DP-SDG / DP-CTGAN via DP-SGD]**
+Simulated Steps = Total Steps = 300, meaning this is a browser-side simulation, not actual DP-CTGAN gradient descent. A real CTGAN alternates Generator and Discriminator updates over thousands of steps. The ε accounting is correct for 300 steps of DP-SGD, but the synthetic data quality claim of a "DP-CTGAN" is misleading — no adversarial training actually occurred.
+
+**Issue 4 — Correlation Structure Not Preserved [DP-SDG / DP-CTGAN via DP-SGD]**
+Frobenius error = 0.362, exceeding the 0.30 acceptable threshold. For a synthetic dataset used in statistical analysis, this means inter-variable dependency structure is broken, and multivariate analyses on the synthetic data will diverge from real data results.
+
+**Issue 5 — No Formal DP Guarantee [Statistical SDG / Gaussian Copula]**
+Privacy model is stated as "Statistical plausible deniability (no formal DP)." DCR = 0.841 is a heuristic score, not a mathematical bound. This method provides zero provable protection against membership inference attacks, making it unsuitable for public microdata release under DPDP Act compliance.

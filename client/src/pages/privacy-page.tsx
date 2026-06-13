@@ -2307,9 +2307,13 @@ export default function PrivacyPage() {
                       {sdgTech === "dp-sdg" && (() => {
                         const N = rawData.length || 100;
                         const B = dpSgdBatchSize;
-                        const T = dpSgdEpochs * Math.ceil(N / Math.max(1, B));
-                        const sigma = computeSigmaFromEpsilon(epsilon[0], delta[0], T, N, B);
-                        const epsActual = computeEpsilonFromSigma(sigma, delta[0], T, N, B);
+                        // Issue 1+2 fix: clamp effectiveB so q = effectiveB/N ≤ 1
+                        const effectiveB = Math.min(B, N);
+                        const bOverflow = B > N;
+                        const q = effectiveB / N;
+                        const T = dpSgdEpochs * Math.ceil(N / effectiveB);
+                        const sigma = computeSigmaFromEpsilon(epsilon[0], delta[0], T, N, effectiveB);
+                        const epsActual = computeEpsilonFromSigma(sigma, delta[0], T, N, effectiveB);
                         const puIndex = Math.max(0, Math.min(1, 1 - epsActual / 10));
                         return (<>
                           <SliderField label="Privacy Budget (ε)" value={epsilon} onChange={setEpsilon} min={0.1} max={10} step={0.1} format={(v) => v.toFixed(1)} helpText="Lower = stronger privacy guarantee" />
@@ -2337,10 +2341,27 @@ export default function PrivacyPage() {
                               <Label className="text-sm">Batch Size (B)</Label>
                               <Input type="number" min={64} max={2048} value={dpSgdBatchSize}
                                 onChange={(e) => setDpSgdBatchSize(Math.max(64, Math.min(2048, parseInt(e.target.value) || 500)))}
-                                className="h-8 text-xs font-mono" data-testid="dp-sdg-batchsize" />
-                              <p className="text-[10px] text-muted-foreground">64 – 2048 records</p>
+                                className={`h-8 text-xs font-mono ${bOverflow ? "border-amber-500 dark:border-amber-400" : ""}`}
+                                data-testid="dp-sdg-batchsize" />
+                              <p className="text-[10px] text-muted-foreground">
+                                {bOverflow
+                                  ? <span className="text-amber-600 dark:text-amber-400 font-medium">B &gt; N — clamped to {effectiveB}. Recommend ≈ {Math.ceil(N / 10)}</span>
+                                  : `Recommend ≈ N/10 = ${Math.ceil(N / 10)} records`}
+                              </p>
                             </div>
                           </div>
+
+                          {/* B > N overflow alert (Issue 1 fix) */}
+                          {bOverflow && (
+                            <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-2.5 flex gap-2 text-xs text-amber-800 dark:text-amber-300">
+                              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-500" />
+                              <span>
+                                <strong>Batch size {B} &gt; N={N}.</strong> Poisson subsampling requires q = B/N ≤ 1.
+                                Automatically clamped to B = {effectiveB} (q = 1.0). RDP accounting is now valid.
+                                For better privacy-utility tradeoff, set B ≈ {Math.ceil(N / 10)}.
+                              </span>
+                            </div>
+                          )}
 
                           {/* Live Privacy Budget Panel */}
                           <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-3 space-y-2">
@@ -2350,6 +2371,10 @@ export default function PrivacyPage() {
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
                               <span className="text-muted-foreground">Target ε</span>
                               <span className="font-semibold">{epsilon[0].toFixed(1)}</span>
+                              <span className="text-muted-foreground">Eff. Batch (q)</span>
+                              <span className={`font-semibold ${bOverflow ? "text-amber-600 dark:text-amber-400" : ""}`}>
+                                {effectiveB} (q = {q.toFixed(3)})
+                              </span>
                               <span className="text-muted-foreground">Required σ</span>
                               <span className="font-semibold text-amber-600 dark:text-amber-400">{sigma.toFixed(3)}</span>
                               <span className="text-muted-foreground">Achieved ε</span>
