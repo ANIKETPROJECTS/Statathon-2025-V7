@@ -672,7 +672,10 @@ export default function PrivacyPage() {
     const profiles: Record<string, ColProfile> = {};
     for (const col of allCols) {
       const vals = rawData.map((r) => r[col]);
-      const numVals = vals.map((v) => parseFloat(String(v))).filter((v) => !isNaN(v));
+      // Bug 1 fix: use Number() not parseFloat() — parseFloat("21.5 acres") = 21.5 (wrong!),
+      // Number("21.5 acres") = NaN (correct). This prevents mixed-unit strings like
+      // "21.5 acres" from being classified as numeric columns.
+      const numVals = vals.map((v) => { const s = String(v ?? "").trim(); return s === "" ? NaN : Number(s); }).filter((v) => !isNaN(v));
       const isNum   = numVals.length > 0.7 * N;
       const strVals = vals.map((v) => String(v ?? ""));
       const uniq    = new Set(strVals);
@@ -901,6 +904,19 @@ export default function PrivacyPage() {
         checks.push({ label: "Target columns", status: "fail", message: "No suitable columns available for this technique." });
       } else {
         checks.push({ label: `Target columns (${activeTarget.length})`, status: "pass", message: activeTarget.slice(0, 3).join(", ") + (activeTarget.length > 3 ? "…" : "") });
+      }
+      // Bug 1 fix: warn about any explicitly-selected columns that are non-numeric
+      // for techniques that require numeric input (rank-swapping, microagg, noise, top/bottom).
+      if (cfg.tcFilter === "numeric" && targetCols.length > 0) {
+        const nonNumSelected = targetCols.filter((c) => !colProfiles[c]?.isNum);
+        nonNumSelected.forEach((c) => {
+          const sampleVal = rawData[0] ? String(rawData[0][c] ?? "") : "?";
+          checks.push({
+            label: `"${c}" — will be SKIPPED`,
+            status: "warn",
+            message: `Non-numeric column (sample value: "${sampleVal}"). ${sdcTech === "rank-swapping" ? "Rank Swapping" : "This technique"} requires pure numeric values. Deselect it or convert to numbers.`,
+          });
+        });
       }
     }
     if (sdcTech === "generalisation" && genColConfigs.length === 0) {

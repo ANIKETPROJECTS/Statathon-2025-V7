@@ -852,6 +852,8 @@ export function applyRankSwapping(
   if (data.length === 0) return sdcEmpty("Rank Swapping");
   const N = data.length;
   const numericCols = targetCols.filter((c) => isNumericCol(data, c));
+  // Bug 1 fix: track columns that were selected but non-numeric (silently skipped before)
+  const skippedCols  = targetCols.filter((c) => !isNumericCol(data, c));
   const p = Math.max(1, Math.round(swapFraction * N));
 
   const processed: DataRow[] = data.map((r) => ({ ...r }));
@@ -924,31 +926,73 @@ export function applyRankSwapping(
   const avgRho = numericCols.length > 0
     ? mean(numericCols.map((c) => parseFloat(String(colStats[c]["Spearman ρ"]))))
     : 1;
-  const compliancePassed = avgRho >= 0.85;
+  const swapOccurred = totalSwappedPairs > 0;
 
-  const interp = `Rank swapping was applied to ${numericCols.length} columns with swap fraction ${(swapFraction * 100).toFixed(0)}% (p=${p} records). ` +
-    `The mean Spearman rank correlation across columns is ${avgRho.toFixed(3)}, indicating ${avgRho >= 0.90 ? "high" : avgRho >= 0.75 ? "moderate" : "low"} data utility retention. ` +
-    `The value distribution for each column remains identical (marginal preservation confirmed).`;
+  // Bug 2 fix: compliance is based on algorithm performance, NOT on whether all selected
+  // columns were processable. Skipped (non-numeric) columns are an input issue → warning,
+  // not a failure. Real failures are: no cols processed, severe distortion, or no swaps.
+  const compliancePassed =
+    numericCols.length > 0 &&     // at least one column actually processed
+    avgRho >= 0.85 &&             // utility retained (spec Section 4.4 threshold)
+    swapOccurred;                 // some swapping occurred
+
+  const interp =
+    `Rank swapping applied to ${numericCols.length} column${numericCols.length !== 1 ? "s" : ""} ` +
+    `(${numericCols.join(", ")}) with swap fraction ${(swapFraction * 100).toFixed(0)}% (p=${p} records). ` +
+    `Mean Spearman ρ = ${avgRho.toFixed(3)} — ${avgRho >= 0.90 ? "high" : avgRho >= 0.75 ? "moderate" : "low"} utility retention. ` +
+    `Marginal preservation confirmed (sorted value distributions identical). ` +
+    (skippedCols.length > 0
+      ? `⚠ ${skippedCols.length} selected column${skippedCols.length > 1 ? "s" : ""} ` +
+        `(${skippedCols.join(", ")}) skipped — non-numeric values; algorithm ran on ${numericCols.length} of ${targetCols.length} selected columns. `
+      : "");
 
   const warnings: string[] = [
-    ...(numericCols.length === 0 ? ["No numeric columns selected. Rank swapping only applies to numeric attributes."] : []),
-    ...(avgRho < 0.85 ? [`High distortion: mean Spearman ρ = ${avgRho.toFixed(3)}. Reduce swap fraction below ${(swapFraction * 50).toFixed(0)}%.`] : []),
+    ...(numericCols.length === 0
+      ? ["No numeric columns to process. Rank swapping only applies to numeric (pure number) columns. All selected columns contain non-numeric values."]
+      : []),
+    // Bug 1 fix: explicitly warn about each skipped column (not silent any more)
+    ...skippedCols.map((c) => {
+      const sampleVal = String(data[0]?.[c] ?? "");
+      return `Column "${c}" skipped — non-numeric (sample value: "${sampleVal}"). Rank swapping requires pure numeric columns. Deselect this column or convert its values to numbers first.`;
+    }),
+    ...(avgRho < 0.85 && numericCols.length > 0
+      ? [`High distortion: mean Spearman ρ = ${avgRho.toFixed(3)} < 0.85 threshold. Reduce swap fraction below ${(swapFraction * 50).toFixed(0)}%.`]
+      : []),
+    ...(!swapOccurred && numericCols.length > 0
+      ? ["No swaps occurred — increase swap fraction or check dataset size."]
+      : []),
   ];
 
   const colTable = numericCols.map((c) =>
     htmlRow(c, `ρ=${colStats[c]["Spearman ρ"]}  MAE=${colStats[c]["MAE"]}  swap=${colStats[c]["Swap Rate"]}`)
   ).join("");
 
+  // Bug 3 fix: separate processed vs skipped in the report params, add compliance criteria
+  const complianceCriteriaHtml = `
+<tr><td colspan="2" style="padding:8px 10px 4px;font-weight:600;color:#1e40af;border-top:2px solid #e5e7eb">Compliance Criteria (Rank Swapping)</td></tr>
+${htmlRow("① Marginal Preservation", "sorted(original) == sorted(result) per column", true)}
+${htmlRow("② Avg Spearman ρ ≥ 0.85", avgRho >= 0.85 ? `${avgRho.toFixed(4)} ✅` : `${avgRho.toFixed(4)} ✗ (< 0.85)`, avgRho >= 0.85)}
+${htmlRow("③ At least one column processed", numericCols.length > 0 ? `${numericCols.length} column(s) ✅` : "0 columns ✗", numericCols.length > 0)}
+${htmlRow("④ Swap occurred", swapOccurred ? "YES ✅" : "NO ✗", swapOccurred)}
+${skippedCols.length > 0 ? htmlRow("⑤ Skipped columns", `${skippedCols.length} (${skippedCols.join(", ")}) — non-numeric; not a FAIL`) : ""}
+`;
+
   const now = new Date().toLocaleString("en-IN");
   const report = buildReport(
     "Rank Swapping", "dataset", now, N, N,
+    // Bug 3 fix: show processed and skipped columns separately
     htmlRow("Swap Fraction", `${(swapFraction * 100).toFixed(0)}%`) +
     htmlRow("Max Rank Distance (p)", `${p} records`) +
-    htmlRow("Target Columns", numericCols.join(", ")) +
+    htmlRow("Target Columns (processed)", numericCols.length > 0 ? numericCols.join(", ") : "None") +
+    (skippedCols.length > 0
+      ? htmlRow("Skipped Columns", `${skippedCols.join(", ")} (non-numeric — string values)`)
+      : "") +
     htmlRow("Random Seed", seed),
-    htmlRow("Avg Spearman ρ", avgRho.toFixed(4), compliancePassed) +
+    htmlRow("Compliance Status", compliancePassed ? "PASS" : "FAIL", compliancePassed) +
+    htmlRow("Avg Spearman ρ", avgRho.toFixed(4), avgRho >= 0.85) +
     htmlRow("Marginal Preservation", "CONFIRMED", true) +
-    htmlRow("Total Swapped Records", totalSwappedPairs),
+    htmlRow("Total Swapped Records", totalSwappedPairs) +
+    complianceCriteriaHtml,
     colTable,
     interp,
     warnings,
@@ -964,6 +1008,9 @@ export function applyRankSwapping(
       swapFraction: `${(swapFraction * 100).toFixed(0)}%`,
       maxRankDistance: p,
       columnsSwapped: numericCols.length,
+      // Bug 1 fix: expose skipped columns in stats so ResultCard can show them
+      columnsSkipped: skippedCols.length,
+      skippedColumnNames: skippedCols.length > 0 ? skippedCols.join(", ") : null,
       avgSpearmanRho: avgRho.toFixed(4),
       marginalPreservation: "CONFIRMED",
     },
