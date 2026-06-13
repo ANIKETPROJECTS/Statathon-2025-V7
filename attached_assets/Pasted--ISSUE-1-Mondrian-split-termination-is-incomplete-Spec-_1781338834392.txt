@@ -1,0 +1,54 @@
+```
+ISSUE 1: Mondrian split termination is incomplete
+- Spec stops splitting when len(left) < k or len(right) < k, abandoning the
+  whole partition instead of trying alternate split columns/points
+- Causes oversized equivalence classes (run 1 had max class size = 7 with k=3,
+  when it could have been split into 3+4)
+- Fix: before giving up on a partition, try other QI columns/split points for
+  a valid k-satisfying split
+
+ISSUE 2: Generalisation Method (Midpoint vs Range) is non-functional for categorical columns
+- UI states "Categorical → most common value per partition" for Midpoint
+- Spec pseudocode says: part[col] = most_common_value(part[col]) for Midpoint
+- Actual output for ALL categorical QIs (District, State, Religion, Social_Group,
+  HH_Type) shows full set notation e.g. {Ambala,Chennai,Kozhikode} — this is
+  Range behavior, not "most common value"
+- Confirmed across two separate runs (different QI sets, both with Midpoint
+  selected) — output is identical style regardless of toggle
+- Fix: implement actual most_common_value() collapse for Midpoint+categorical,
+  or remove/relabel the toggle if categorical always uses Range
+
+ISSUE 3: Numeric Midpoint formula not applied either
+- Spec: mid = (min+max)/2 → single number for numeric QI (e.g. HH_Size)
+- Actual output shows HH_Size as range string "[1–5]", not a midpoint value
+- Same root cause as Issue 2 — Midpoint mode appears entirely unimplemented
+
+ISSUE 4: GIL formula undefined for categorical columns
+- Spec formula: GIL = (1/(|QI|×N)) × Σ (range_in_partition / global_range)
+- "Range" has no natural definition for categorical data
+- Per-column GIL values (District=13.32%, Religion=23.33%, etc.) are produced
+  but the categorical case isn't specified — implementation invented its own
+  (likely num_unique_in_partition / num_unique_globally) without documentation
+
+ISSUE 5: Suppression/merge fallback unverified
+- Spec: if suppressed_count > max_suppress, merge smallest partitions
+- Both test runs had 0 suppressed records and min class = k exactly, so this
+  path was never triggered
+- Untested — needs a run with higher k or stricter suppression limit to confirm
+  it works (or doesn't crash)
+
+ISSUE 6: Direct-ID columns retained in output
+- FSU_Serial_No, District_code, State_Region, Sample_Hhld_No (flagged Direct-ID
+  in UI) remain completely unaltered in the output CSV
+- Spec only excludes them from QI checkboxes, doesn't mandate stripping/
+  pseudonymizing them from the final deliverable
+- Result: output file still contains direct identifiers despite "PASS" status
+
+ISSUE 7: Generalization granularity is unpredictable run-to-run
+- Same technique with different QI sets produced wildly different category-set
+  sizes for the same column (Religion: {Buddhism,Christianity,Hinduism} vs
+  {Christianity,Hinduism} across runs)
+- Greedy Mondrian non-determinism isn't surfaced/caveated to the user, so
+  reported GIL/utility numbers can vary significantly between runs on the
+  same dataset and settings
+```

@@ -237,48 +237,95 @@ export function applyKAnonymity(
   data: DataRow[],
   qis: string[],
   k: number,
-  suppressionLimit: number, // 0–1
+  suppressionLimit: number,       // 0–1 fraction
   genMethod: "midpoint" | "range" = "range",
+  directIds: string[] = [],       // Issue 6: columns to pseudonymise
 ): PrivacyResult {
   const t0 = performance.now();
   if (data.length === 0 || qis.length === 0) return sdcEmpty("K-Anonymity (Mondrian)");
 
   const N = data.length;
+  const maxSuppressCount = Math.ceil(suppressionLimit * N);
+
+  // ── Issue 7: Sort data stably by QI values before partitioning for full determinism ──
+  const stableData = [...data].sort((a, b) => {
+    for (const qi of qis) {
+      const va = String(a[qi] ?? ""), vb = String(b[qi] ?? "");
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+    }
+    return 0;
+  });
+
   const globalRanges = new Map<string, number>();
-  qis.forEach((c) => globalRanges.set(c, columnRange(data, c)));
+  qis.forEach((c) => globalRanges.set(c, columnRange(stableData, c)));
   const globalDistinctCountsKA = new Map<string, number>();
   qis.forEach((c) => {
-    if (!isNumericCol(data, c)) {
-      globalDistinctCountsKA.set(c, Math.max(new Set(data.map((r) => String(r[c]))).size, 2));
+    if (!isNumericCol(stableData, c)) {
+      globalDistinctCountsKA.set(c, Math.max(new Set(stableData.map((r) => String(r[c]))).size, 2));
     }
   });
 
-  const partitions = mondrianPartition(data, qis, k);
+  // ── Issue 6: Build stable pseudonym maps for Direct-ID columns ──────────────
+  // Same original value always maps to the same PSEUDO_NNNNN within this run.
+  const pseudoMaps = new Map<string, Map<string, string>>();
+  directIds.forEach((col) => {
+    const map = new Map<string, string>();
+    let counter = 1;
+    stableData.forEach((row) => {
+      const v = String(row[col] ?? "");
+      if (!map.has(v)) { map.set(v, `PSEUDO_${String(counter).padStart(5, "0")}`); counter++; }
+    });
+    pseudoMaps.set(col, map);
+  });
+
+  // ── Partition ────────────────────────────────────────────────────────────────
+  const rawPartitions = mondrianPartition(stableData, qis, k);
+  let validPartitions = rawPartitions.filter((p) => p.indices.length >= k);
+  let smallPartitions = rawPartitions.filter((p) => p.indices.length < k);
+  const initialSmallCount = smallPartitions.reduce((s, p) => s + p.indices.length, 0);
+
+  // ── Issue 5: Merge-smallest fallback when suppression would exceed limit ─────
+  const mergedPartitions: Partition[] = [];
+  let mergeActivated = false;
+  if (initialSmallCount > maxSuppressCount && smallPartitions.length > 0) {
+    mergeActivated = true;
+    smallPartitions.sort((a, b) => a.indices.length - b.indices.length);
+    let pool: number[] = [];
+    for (const sp of smallPartitions) {
+      pool = [...pool, ...sp.indices];
+      if (pool.length >= k) {
+        mergedPartitions.push({ indices: pool });
+        pool = [];
+      }
+    }
+    // Remaining pool that still can't reach k → will be suppressed
+    smallPartitions = pool.length > 0 ? [{ indices: pool }] : [];
+  }
+
+  const allValidPartitions = [...validPartitions, ...mergedPartitions];
   const suppressed: number[] = [];
   const processed: DataRow[] = [];
   const equivClassSizes: number[] = [];
-
-  // GIL: GIL = (1/(|QI|×N)) × Σ_col Σ_record (range_in_partition / global_range)
   const gilPerCol = new Map<string, number>();
   qis.forEach((c) => gilPerCol.set(c, 0));
 
-  for (const partition of partitions) {
+  smallPartitions.forEach((p) => suppressed.push(...p.indices));
+
+  const allRowKeys = stableData.length > 0 ? Object.keys(stableData[0]) : [];
+  const nonQInonDirect = allRowKeys.filter((c) => !qis.includes(c) && !directIds.includes(c));
+
+  for (const partition of allValidPartitions) {
     const { indices } = partition;
-    if (indices.length < k) {
-      suppressed.push(...indices);
-      continue;
-    }
     equivClassSizes.push(indices.length);
 
     const generalised: DataRow = {};
     qis.forEach((col) => {
-      const vals = indices.map((i) => data[i][col]);
-      if (isNumericCol(data, col)) {
+      const vals = indices.map((i) => stableData[i][col]);
+      if (isNumericCol(stableData, col)) {
         const nums = vals.map((v) => Number(v)).filter((v) => !isNaN(v));
         const lo = Math.min(...nums), hi = Math.max(...nums);
-        const partRange = hi - lo;
-        const gRange = Math.max(globalRanges.get(col) || 1, 1);
-        gilPerCol.set(col, (gilPerCol.get(col) || 0) + (partRange / gRange) * indices.length);
+        gilPerCol.set(col, (gilPerCol.get(col) || 0) + ((hi - lo) / Math.max(globalRanges.get(col) || 1, 1)) * indices.length);
         if (genMethod === "midpoint") {
           const mid = (lo + hi) / 2;
           generalised[col] = String(Number.isInteger(mid) ? mid : mid.toFixed(2));
@@ -289,11 +336,12 @@ export function applyKAnonymity(
         const distinct = Array.from(new Set(vals.map(String))).sort();
         const globalD = globalDistinctCountsKA.get(col) || 2;
         const localD = distinct.length;
+        // Issue 4: Categorical GIL proxy = (distinct_partition − 1) / (distinct_global − 1)
         if (localD > 1) {
           gilPerCol.set(col, (gilPerCol.get(col) || 0) + ((localD - 1) / (globalD - 1)) * indices.length);
         }
         if (genMethod === "midpoint") {
-          // Most common value in partition = "centre" for categorical
+          // Most-common value in partition = categorical "centre"
           const freq = new Map<string, number>();
           vals.forEach((v) => { const s = String(v); freq.set(s, (freq.get(s) || 0) + 1); });
           let bestVal = distinct[0], bestCnt = 0;
@@ -305,15 +353,19 @@ export function applyKAnonymity(
       }
     });
 
-    const nonQI = Object.keys(data[0]).filter((c) => !qis.includes(c));
     indices.forEach((i) => {
       const row: DataRow = { ...generalised };
-      nonQI.forEach((c) => (row[c] = data[i][c]));
+      nonQInonDirect.forEach((c) => (row[c] = stableData[i][c]));
+      // Issue 6: replace Direct-ID values with pseudonyms
+      directIds.forEach((c) => {
+        const v = String(stableData[i][c] ?? "");
+        row[c] = pseudoMaps.get(c)?.get(v) ?? v;
+      });
       processed.push(row);
     });
   }
 
-  // Normalise GIL by N (total input records) per the NIST spec: GIL = (1/(|QI|×N)) × Σ
+  // ── Issue 4: GIL — normalise by N (spec: GIL = 1/(|QI|×N) × Σ) ─────────────
   const gilCols: Record<string, number> = {};
   let gilTotal = 0;
   qis.forEach((col) => {
@@ -326,23 +378,42 @@ export function applyKAnonymity(
   const minEC = equivClassSizes.length > 0 ? Math.min(...equivClassSizes) : 0;
   const avgEC = equivClassSizes.length > 0 ? mean(equivClassSizes) : 0;
   const suppressionRate = N > 0 ? suppressed.length / N : 0;
-  const kSatisfied = minEC >= k && suppressed.length <= Math.ceil(suppressionLimit * N);
+  const kSatisfied = minEC >= k && suppressed.length <= maxSuppressCount;
 
+  // Issue 4: surface GIL formula per column in the colStats panel
   const colStatsGIL: Record<string, Record<string, string | number>> = {};
   qis.forEach((col) => {
-    colStatsGIL[col] = { "GIL": gilCols[col] };
+    const isNum = isNumericCol(stableData, col);
+    colStatsGIL[col] = {
+      "GIL": gilCols[col],
+      "GIL formula": isNum ? "range_part / range_global" : "(distinct_part−1) / (distinct_global−1)",
+    };
   });
 
-  const interp = `This dataset was anonymised using k-Anonymity (Mondrian) with k=${k}. ` +
-    `${equivClassSizes.length} equivalence classes were formed. ` +
-    `The smallest class contains ${minEC} records${minEC >= k ? " — k-anonymity IS satisfied" : " — WARNING: k-anonymity is NOT satisfied"}. ` +
-    `Generalisation Information Loss (GIL) = ${(gil * 100).toFixed(1)}%, meaning ${(gil * 100).toFixed(0)}% of QI precision was sacrificed for privacy. ` +
-    `${suppressed.length} records (${(suppressionRate * 100).toFixed(1)}%) were suppressed.`;
+  const pseudoNote = directIds.length > 0
+    ? ` Direct-ID columns (${directIds.join(", ")}) were pseudonymised — original values replaced with sequential PSEUDO_NNNNN identifiers.`
+    : "";
+  const mergeNote = mergeActivated
+    ? ` Suppression limit was exceeded; merge fallback formed ${mergedPartitions.length} additional group(s) from small partitions.`
+    : "";
+  const gilNote = `Categorical GIL uses proxy (distinct_in_partition − 1)/(distinct_global − 1); numeric GIL uses partition_range/global_range (NIST 8053 §4.3 adaptation).`;
+  const detNote = `Output is fully deterministic: data was sorted by QI values before Mondrian partitioning.`;
+
+  const interp =
+    `This dataset was anonymised using k-Anonymity (Mondrian, ${genMethod === "midpoint" ? "midpoint" : "range"} generalisation) with k=${k}. ` +
+    `${equivClassSizes.length} equivalence classes were formed (min=${minEC}, avg=${avgEC.toFixed(1)}, max=${equivClassSizes.length > 0 ? Math.max(...equivClassSizes) : 0}). ` +
+    `k-Anonymity is ${kSatisfied ? "SATISFIED" : "NOT SATISFIED — min class < k"}. ` +
+    `GIL = ${(gil * 100).toFixed(1)}% — ${(gil * 100).toFixed(0)}% of QI precision sacrificed for privacy. ` +
+    `${suppressed.length} records (${(suppressionRate * 100).toFixed(1)}%) suppressed.` +
+    mergeNote + pseudoNote + " " + gilNote + " " + detNote;
 
   const warnings: string[] = [
-    ...(suppressionRate > suppressionLimit && suppressionLimit > 0 ? [`Suppression rate ${(suppressionRate*100).toFixed(1)}% exceeds limit ${(suppressionLimit*100).toFixed(0)}% — increase k tolerance or reduce QI columns.`] : []),
+    ...(suppressionRate > suppressionLimit && suppressionLimit > 0
+      ? [`Suppression ${(suppressionRate*100).toFixed(1)}% exceeds limit ${(suppressionLimit*100).toFixed(0)}% — consider lowering k or raising the suppression limit.`] : []),
+    ...(mergeActivated ? [`Merge fallback: ${mergedPartitions.length} group(s) formed by merging small partitions to honour suppression limit.`] : []),
     ...(suppressionRate > 0.1 ? ["Suppression > 10% — consider lowering k."] : []),
-    ...(gil > 0.5 ? ["High GIL (> 0.50): High information loss detected. Consider reducing k or adding more QI columns."] : []),
+    ...(gil > 0.5 ? ["GIL > 50% — high information loss. Consider reducing k or narrowing QI set."] : []),
+    ...(directIds.length > 0 ? [`${directIds.length} Direct-ID column(s) pseudonymised: ${directIds.join(", ")}.`] : []),
     "k-Anonymity does not protect against attribute disclosure or differencing attacks.",
   ];
 
@@ -350,14 +421,23 @@ export function applyKAnonymity(
   const report = buildReport(
     "K-Anonymity",
     "dataset", now, N, processed.length,
-    htmlRow("K Value", k) + htmlRow("Suppression Limit", `${(suppressionLimit * 100).toFixed(0)}%`) + htmlRow("QI Columns", qis.join(", ")),
+    htmlRow("K Value", k) +
+    htmlRow("Suppression Limit", `${(suppressionLimit * 100).toFixed(0)}%`) +
+    htmlRow("Generalisation Method", genMethod === "midpoint" ? "Midpoint [(lo+hi)/2 | most_common_value]" : "Range [[lo–hi] | {all_values}]") +
+    htmlRow("QI Columns", qis.join(", ")) +
+    (directIds.length > 0 ? htmlRow("Pseudonymised Direct-IDs", directIds.join(", ")) : ""),
     htmlRow("k-Anonymity Satisfied", kSatisfied ? "YES" : "NO", kSatisfied) +
     htmlRow("Min Equivalence Class", `${minEC} (≥ ${k})`, minEC >= k) +
     htmlRow("Avg Equivalence Class", avgEC.toFixed(1)) +
+    htmlRow("Max Equivalence Class", equivClassSizes.length > 0 ? String(Math.max(...equivClassSizes)) : "0") +
     htmlRow("Number of Classes", equivClassSizes.length) +
-    htmlRow("Suppressed Records", `${suppressed.length} (${(suppressionRate*100).toFixed(1)}%)`, suppressionRate <= suppressionLimit),
-    htmlRow("GIL Score", `${(gil * 100).toFixed(2)}%`, gil <= 0.3) +
-    qis.map((col) => htmlRow(`GIL — ${col}`, `${(gilCols[col] * 100).toFixed(2)}%`)).join(""),
+    htmlRow("Suppressed Records", `${suppressed.length} (${(suppressionRate*100).toFixed(1)}%)`, suppressionRate <= suppressionLimit) +
+    (mergeActivated ? htmlRow("Merge Fallback Groups", mergedPartitions.length) : ""),
+    htmlRow("GIL Score (avg across QIs)", `${(gil * 100).toFixed(2)}%`, gil <= 0.3) +
+    qis.map((col) => htmlRow(
+      `GIL — ${col} (${isNumericCol(stableData, col) ? "numeric: range/global_range" : "categorical: (d_p−1)/(d_g−1)"})`,
+      `${(gilCols[col] * 100).toFixed(2)}%`,
+    )).join(""),
     interp,
     warnings.filter((w) => !w.includes("does not protect")),
   );
@@ -377,6 +457,9 @@ export function applyKAnonymity(
       maxEquivClassSize: equivClassSizes.length > 0 ? Math.max(...equivClassSizes) : 0,
       suppressionRate: `${(suppressionRate * 100).toFixed(1)}%`,
       suppressedRecords: suppressed.length,
+      mergedGroups: mergeActivated ? mergedPartitions.length : 0,
+      pseudonymisedCols: directIds.length,
+      generalisationMethod: genMethod,
       gilScore: `${(gil * 100).toFixed(2)}%`,
     },
     colStats: colStatsGIL,

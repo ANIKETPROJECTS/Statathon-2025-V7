@@ -955,9 +955,11 @@ export default function PrivacyPage() {
 
       if (family === "sdc") {
         switch (sdcTech) {
-          case "k-anonymity":
-            res = applyKAnonymity(rawData, quasiIdentifiers, kVal[0], suppLimit[0] / 100, genMethod);
+          case "k-anonymity": {
+            const directIdCols = allCols.filter((c) => colProfiles[c]?.classification === "DIRECT_ID");
+            res = applyKAnonymity(rawData, quasiIdentifiers, kVal[0], suppLimit[0] / 100, genMethod, directIdCols);
             break;
+          }
           case "l-diversity":
             res = applyLDiversity(rawData, quasiIdentifiers, sensitiveAttr, lVal[0], lMethod, lKBase[0], cRecursive[0]);
             break;
