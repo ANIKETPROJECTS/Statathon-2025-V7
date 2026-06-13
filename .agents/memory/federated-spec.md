@@ -10,7 +10,8 @@ description: FedAvg + DP-FedAvg Tabular Autoencoder implementation in federated.
 - Input preprocessing: z-score normalization for numeric, one-hot for categorical
 
 ## Critical Bug Fixes (applied)
-- **Gradient scaling**: MSE loss was divided by (N × d) — with d=190 this made gradients ~190× too small, causing near-zero weight norm change. Fixed to divide by N only (mean over batch, sum over dims). Loss formula: Σ(out-x)²/(2N); gradient: (out-x)/N.
+- **Gradient scaling + loss scale (FINAL)**: Reported loss uses per-element MSE Σ(out-x)²/(2Nd) — preserves ~0.067 scale, comparable across all runs and datasets regardless of d. Optimizer gradient uses (out-x)/N (NOT divided by d) — decoupled from reported loss so gradients have proper magnitude for convergence with large d. NEVER couple both to the same divisor: /Nd makes gradients too small; /N makes loss scale 167× too large.
+- **Weight decay**: Added L2 weight decay λ=0.001 to sgdStep (weights only, not biases). Prevents weight norm from growing monotonically during FedAvg aggregation (client drift). Stable norm bound ≈ ‖grad‖/(N·λ).
 - **Constant column skip**: buildSchema now checks rawStd===0 BEFORE applying the ||1 fallback, and skips σ=0 columns entirely. The ||1 fallback previously let blank/all-zero columns through, feeding undefined z-scores to the autoencoder.
 - **compliancePassed**: Now requires dp !== null in addition to loss decline. FedAvg without DP does not satisfy DPDP Act §8(4) — tying compliance to convergence alone was incorrect.
 - **Convergence badge**: Now requires ≥2% loss improvement (not just any decrease). Badge shows DP status separately: "CONVERGED — DP-FedAvg Active" vs "CONVERGED — No Formal DP Guarantee" vs "NOT CONVERGED".

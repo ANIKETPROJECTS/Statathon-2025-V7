@@ -192,11 +192,13 @@ function batchGrad(
   for (const x of batch) {
     const { acts, pres } = forwardAll(model, x);
     const out = acts[nL];
-    // MSE loss: mean over batch, sum over dims — gives gradients of proper magnitude
-    // Dividing by (N*d) was making gradients ~d× too small, causing near-zero weight updates
-    loss += out.reduce((s, v, i) => s + (v - x[i]) ** 2, 0) / (2 * N);
+    // Reported loss: per-element MSE — divided by (N × d) for scale-invariant display.
+    // This matches the original ~0.067 range and keeps runs comparable regardless of d.
+    loss += out.reduce((s, v, i) => s + (v - x[i]) ** 2, 0) / (2 * N * x.length);
 
-    // dL/dOutput = (out - x) / N  (mean over batch only, NOT divided by input dim)
+    // Optimizer gradient: mean over batch only (NOT divided by d).
+    // Decoupled from the reported loss so gradients have proper magnitude even for large d.
+    // Equivalent to using an effective lr × d for the optimizer while keeping loss display at 1/d scale.
     let dOut = out.map((v, i) => (v - x[i]) / N);
 
     for (let li = nL - 1; li >= 0; li--) {
@@ -211,11 +213,15 @@ function batchGrad(
   return { loss, dW, db };
 }
 
-// SGD update
+// SGD update with L2 weight decay
+// Weight decay λ=0.001 bounds ‖W‖_F so weight norms cannot grow monotonically during FedAvg
+// aggregation. Biases are excluded from decay (standard practice — no regularisation on biases).
+const WEIGHT_DECAY = 0.001;
+
 function sgdStep(model: Model, dW: number[][][], db: number[][], lr: number): Model {
   return model.map((L, i) => ({
     ...L,
-    W: L.W.map((row, r) => row.map((w, c) => w - lr * dW[i][r][c])),
+    W: L.W.map((row, r) => row.map((w, c) => w * (1 - lr * WEIGHT_DECAY) - lr * dW[i][r][c])),
     b: L.b.map((v, r) => v - lr * db[i][r]),
   }));
 }
