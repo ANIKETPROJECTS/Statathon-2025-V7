@@ -1,0 +1,61 @@
+The Utility Measurement module has a critical data-type validation bug causing false "100% SFS" scores.
+
+ISSUE: For columns Land_Owned, Land_Possessed, Land_Cultivated, MLT, MLT_SR, and Multiplier_comb, 
+the Privacy Enhancement step (K-Anonymity/Mondrian) replaced numeric values with pseudonymized 
+string tokens (e.g. "PSEUDO_95012") instead of generalizing or binning the numeric ranges. 
+The Statistical Fidelity table currently shows these columns with Orig Mean = Proc Mean, 
+Var Ratio = 1.00, NMAE = 0, KS = 0, JSD = 0, SFS = 100% — but the processed column contains 
+no numeric data at all, so these stats are either copied from the original or defaulted, 
+not actually computed on the processed column.
+
+FIXES NEEDED:
+
+1. Before computing any numeric metric (MAE, Relative Bias, Variance Ratio, MPS, Percentile 
+   Preservation, KS, JSD, Wasserstein, EPR), check if the processed column is still numeric/
+   numeric-coercible. If it has been converted to non-numeric tokens (e.g. matches pattern 
+   "PSEUDO_*" or fails pd.to_numeric), do NOT compute SFS=100%. Instead:
+   - Mark the column as "Type Mismatch — Column Pseudonymized"
+   - Set SFS = 0% (total information loss for analytical/statistical use)
+   - Show a red ⚠ badge: "Column converted to identifiers — not usable for statistical analysis"
+   - Move this column into the "Suppressed/Removed Columns" style section (Section D3) 
+     even though it technically still exists, since it's been functionally destroyed for utility purposes
+
+2. Fix Land_Owned, Land_Possessed, Land_Cultivated: the original values contain unit suffixes 
+   (" acres"). The numeric extraction is currently producing Orig Mean = 0.00 for these columns — 
+   strip the " acres" suffix and parse as float BEFORE computing any statistic, for BOTH 
+   original and processed columns (where applicable).
+
+3. Resolve the contradiction between the Statistical tab and Distributions tab: for MLT, 
+   MLT_SR, and Multiplier_comb, the Distributions tab correctly shows JSD=1.000, 
+   Wasserstein=1.000, EPR=0.000 (total divergence), while the Statistical tab shows SFS=100% 
+   for the same columns. Both tabs must derive SFS from the same underlying per-column 
+   computation — once fix #1 is applied, both tabs should consistently show these columns 
+   as failed/0%.
+
+4. Recompute the Overall Utility Score (OUS) after fixes 1–3. With 6 of 8 numeric columns 
+   now scoring SFS=0% instead of 100%, the Statistical Fidelity (SFS) family average will 
+   drop significantly, which should pull the OUS well below 90.6% / Grade A+. Recompute 
+   OUS = SFS×0.30 + DS×0.25 + IC×0.20 + CP×0.15 + PU×0.10 with corrected SFS values.
+
+5. Predictive Utility currently shows 100.0% — this is computed via pairwise correlations 
+   (Section 6 compute_r2_retention). Since HH_Size and No_NREG_Card rows are row-shuffled 
+   between original and processed (same marginal mean/variance but different row order/values), 
+   and 6 other numeric columns are pseudonymized strings, the correlation-based Predictive 
+   Utility computation has almost no valid numeric column pairs to work with. Audit this 
+   function: if fewer than 2 valid numeric columns remain after fix #1, Predictive Utility 
+   should show "Insufficient numeric columns for predictive utility assessment" instead of 100%.
+
+6. Add the missing "Risk Reduction" metric card in Section A Summary Dashboard (currently 
+   absent) — it should pull from the Risk Assessment module per spec section 8.1, or show 
+   "Run Risk Assessment first" if unavailable (consistent with the Privacy-Utility tab's 
+   Risk-Utility Trade-off panel which already shows this message correctly).
+
+7. For the "Blank" column (100% null in both original and processed), Histogram Intersection 
+   of two empty distributions is mathematically 0/undefined. Currently shown as HI=0.000, 
+   SFS=50% (red). Change handling: if a column is 100% null in both original and processed, 
+   exclude it from scoring entirely and display "N/A — column entirely empty" rather than 
+   a failing score.
+
+8. Re-verify the Correlation Preservation (currently 86.7%) and Privacy-Utility Radar after 
+   fixes 1 and 5, since the correlation matrix is built from the same set of numeric columns 
+   affected by the pseudonymization issue.
