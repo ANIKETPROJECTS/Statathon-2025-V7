@@ -710,7 +710,29 @@ export function computeUtilityMetrics(
     : null;
 
   const grade = getGrade(ous);
-  const verdict = getVerdict(ous, riskReduction, suppPct);
+  const baseVerdict = getVerdict(ous, riskReduction, suppPct);
+
+  // When columns are excluded from scoring, qualify the grade label and verdict
+  // so the headline never claims "no utility loss" while simultaneously flagging destroyed columns.
+  const totalExcluded = pseudonymizedCols.length + allNullCols.length;
+  const totalScored = scoredNumFidelity.length + catCols.length;
+  const totalOrig = numericCols.length + catCols.length;
+
+  let gradeLabel = getGradeLabel(grade);
+  let verdict = baseVerdict;
+
+  if (totalExcluded > 0) {
+    // Replace the grade label with a qualified version
+    const baseLabel = getGradeLabel(grade);
+    gradeLabel = `${baseLabel.split(' —')[0]} on retained columns — ${totalExcluded} column(s) lost all analytical value`;
+
+    // Prepend a clear qualifier to the verdict
+    const excludedDesc = pseudonymizedCols.length > 0
+      ? `${pseudonymizedCols.length} column(s) pseudonymized (${pseudonymizedCols.slice(0, 3).join(', ')}${pseudonymizedCols.length > 3 ? '…' : ''})`
+      : `${allNullCols.length} column(s) null`;
+    const scoringNote = `Score computed on ${totalScored} of ${totalOrig} columns — ${excludedDesc}.`;
+    verdict = `${baseVerdict}  [${scoringNote}]`;
+  }
 
   // Auto-recommendations
   const recommendations: string[] = [];
@@ -731,7 +753,7 @@ export function computeUtilityMetrics(
     recommendations.push('Data utility is well-preserved. The processed dataset is suitable for the intended analytical tasks.');
 
   return {
-    ous, grade, gradeLabel: getGradeLabel(grade), verdict,
+    ous, grade, gradeLabel, verdict,
     sfs, dsScore, icScore, cpScore, puScore,
     puInsufficient,
     rowsOrig: origRows.length, rowsProc: procRows.length,
