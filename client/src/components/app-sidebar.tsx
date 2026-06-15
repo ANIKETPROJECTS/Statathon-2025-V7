@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 
 import dashboardIcon  from "@assets/dashboard.png";
 import folderIcon     from "@assets/folder.png";
-import cautionIcon    from "@assets/caution-sign.png";
+import cautionIcon    from "@assets/warning.png";
 import securityIcon   from "@assets/security.png";
 import graphIcon      from "@assets/graph.png";
 import statisticsIcon from "@assets/statistics.png";
@@ -51,7 +51,7 @@ function NavIcon({ src, alt }: { src: string; alt: string }) {
     <img
       src={src}
       alt={alt}
-      className="h-5 w-5 object-contain shrink-0"
+      className="h-[22px] w-[22px] object-contain shrink-0"
       style={{ filter: "brightness(0)" }}
     />
   );
@@ -127,8 +127,8 @@ export function AppSidebar() {
                           <NavIcon src={item.icon} alt={item.title} />
                           <span
                             className={[
-                              "text-[14px] leading-snug tracking-wide",
-                              active ? "font-bold text-blue-700" : "font-semibold text-black",
+                              "text-[15px] leading-snug tracking-wide",
+                              active ? "font-semibold text-blue-700" : "font-medium text-black",
                             ].join(" ")}
                             style={poppins}
                           >
@@ -172,8 +172,8 @@ export function AppSidebar() {
                           <NavIcon src={item.icon} alt={item.title} />
                           <span
                             className={[
-                              "text-[14px] leading-snug tracking-wide",
-                              active ? "font-bold text-blue-700" : "font-semibold text-black",
+                              "text-[15px] leading-snug tracking-wide",
+                              active ? "font-semibold text-blue-700" : "font-medium text-black",
                             ].join(" ")}
                             style={poppins}
                           >
