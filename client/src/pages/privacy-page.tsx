@@ -450,7 +450,7 @@ function TechList({ items, selected, onSelect }: {
           data-testid={`technique-${tech.id}`}
         >
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{tech.label}</p>
+            <p className="text-base font-medium truncate">{tech.label}</p>
             <p className="text-xs text-muted-foreground truncate">{tech.subtitle}</p>
           </div>
           {selected === tech.id && <CheckCircle className="h-4 w-4 text-primary shrink-0" />}
@@ -1308,8 +1308,7 @@ export default function PrivacyPage() {
                   }`}
                   data-testid={`family-tab-${f.id}`}
                 >
-                  <f.icon className={`h-4 w-4 shrink-0 ${family === f.id ? "text-blue-600 dark:text-blue-400" : f.color}`} />
-                  <span className="text-xs font-medium leading-snug">{f.label}</span>
+                  <span className="text-sm font-medium leading-snug">{f.label}</span>
                 </div>
               ))}
             </div>
