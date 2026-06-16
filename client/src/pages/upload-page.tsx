@@ -169,8 +169,8 @@ export default function UploadPage() {
   /* ── FULL DATA VIEW ── */
   if (viewDataset) {
     return (
-      <DashboardLayout title="Data Upload" breadcrumbs={[{ label: "Data Upload" }]}>
-        <div className="flex flex-col min-w-0 overflow-hidden" style={{ ...poppins, height: "calc(100vh - 160px)" }}>
+      <DashboardLayout title="Data Upload" breadcrumbs={[{ label: "Data Upload" }]} fullHeight>
+        <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden" style={poppins}>
           {/* Back bar — fixed, does not scroll */}
           <div className="flex items-center justify-between mb-5 shrink-0">
             <button
