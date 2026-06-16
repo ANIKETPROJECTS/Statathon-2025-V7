@@ -64,8 +64,8 @@ export function DashboardLayout({ children, title, breadcrumbs = [], fullHeight 
 
         <footer className="border-t bg-slate-50 dark:bg-slate-900 px-8 py-3 shrink-0">
           <div className="flex items-center justify-between text-xs text-slate-400" style={{ fontFamily: "'Poppins', sans-serif" }}>
-            <span>Government of India — Ministry of Electronics and Information Technology</span>
-            <span>Developed by AIRAVATA Technologies</span>
+            <span className="text-black">Ministry of Statistics and Programme Implementation of India</span>
+            <span className="text-black">Developed by AIRAVATA Technologies</span>
           </div>
         </footer>
       </SidebarInset>
