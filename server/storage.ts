@@ -9,6 +9,7 @@ import {
   ReportModel,
   ConfigProfileModel,
   ActivityLogModel,
+  SharedFileModel,
 } from "./db";
 import type {
   User, InsertUser,
@@ -19,6 +20,7 @@ import type {
   Report, InsertReport,
   ConfigProfile, InsertConfigProfile,
   ActivityLog, InsertActivityLog,
+  SharedFile, InsertSharedFile,
 } from "@shared/schema";
 
 if (!process.env.MONGODB_URI) {
@@ -62,6 +64,16 @@ export interface IStorage {
   deleteConfigProfile(id: string): Promise<void>;
 
   createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
+
+  // Admin - User Management
+  getAllUsers(): Promise<User[]>;
+  deleteUser(id: string): Promise<void>;
+
+  // Shared Files
+  createSharedFile(data: InsertSharedFile): Promise<SharedFile>;
+  getSharedFilesByOwner(sharedByUserId: string): Promise<SharedFile[]>;
+  getSharedFilesForUser(sharedWithUserId: string): Promise<SharedFile[]>;
+  deleteSharedFile(id: string): Promise<void>;
 
   getStats(userId: string): Promise<{ datasets: number; assessments: number; reports: number; operations: number }>;
 }
@@ -251,6 +263,40 @@ export class MongoStorage implements IStorage {
   async createActivityLog(log: InsertActivityLog): Promise<ActivityLog> {
     const d = await ActivityLogModel.create(log);
     return doc<ActivityLog>(d);
+  }
+
+  // ── Admin - User Management ────────────────────────────────────────────────
+  async getAllUsers(): Promise<User[]> {
+    const list = await UserModel.find().sort({ createdAt: -1 });
+    return list.map((d) => doc<User>(d));
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await UserModel.findByIdAndDelete(id);
+  }
+
+  // ── Shared Files ───────────────────────────────────────────────────────────
+  async createSharedFile(data: InsertSharedFile): Promise<SharedFile> {
+    const d = await SharedFileModel.create(data);
+    return doc<SharedFile>(d);
+  }
+
+  async getSharedFilesByOwner(sharedByUserId: string): Promise<SharedFile[]> {
+    const list = await SharedFileModel.find({ sharedByUserId }).sort({ sharedAt: -1 });
+    return list.map((d) => doc<SharedFile>(d));
+  }
+
+  async getSharedFilesForUser(sharedWithUserId: string): Promise<SharedFile[]> {
+    const list = await SharedFileModel.find({ sharedWithUserId }).sort({ sharedAt: -1 });
+    return list.map((d) => doc<SharedFile>(d));
+  }
+
+  async deleteSharedFile(id: string): Promise<void> {
+    try {
+      await SharedFileModel.findByIdAndDelete(id);
+    } catch {
+      // ignore invalid id
+    }
   }
 
   // ── Stats ──────────────────────────────────────────────────────────────────

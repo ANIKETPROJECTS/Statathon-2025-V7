@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -6,79 +5,47 @@ import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Shield, Lock, Database, FileCheck, BarChart3, Loader2 } from "lucide-react";
-import backgroundImage from "@assets/background.jpg";
+import { Loader2 } from "lucide-react";
+
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
   password: z.string().min(1, "Password is required"),
 });
-
-const registerSchema = z.object({
-  username: z.string().min(3, "Username must be at least 3 characters"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-  email: z.string().email("Invalid email address"),
-  fullName: z.string().min(2, "Full name is required"),
-  role: z.enum(["admin", "analyst", "officer"]).default("analyst"),
-  department: z.string().optional(),
-});
-
 type LoginFormData = z.infer<typeof loginSchema>;
-type RegisterFormData = z.infer<typeof registerSchema>;
 
 export default function AuthPage() {
   const [, setLocation] = useLocation();
-  const { user, loginMutation, registerMutation } = useAuth();
-  const [activeTab, setActiveTab] = useState("login");
+  const { user, loginMutation } = useAuth();
 
   const loginForm = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
     defaultValues: { username: "", password: "" },
   });
 
-  const registerForm = useForm<RegisterFormData>({
-    resolver: zodResolver(registerSchema),
-    defaultValues: { 
-      username: "", 
-      password: "", 
-      email: "", 
-      fullName: "",
-      role: "analyst",
-      department: "",
-    },
-  });
-
   if (user) {
-    setLocation("/");
+    const role = user.role;
+    if (role === "researcher") setLocation("/researcher");
+    else setLocation("/");
     return null;
   }
 
-  const onLogin = (data: LoginFormData) => {
-    loginMutation.mutate(data);
-  };
-
-  const onRegister = (data: RegisterFormData) => {
-    registerMutation.mutate(data);
-  };
+  const onLogin = (data: LoginFormData) => loginMutation.mutate(data);
 
   return (
     <div className="h-screen flex flex-col bg-background relative overflow-hidden">
+      {/* ── Top header bar ── */}
       <header className="relative z-50 w-full bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 py-4 px-8 shrink-0">
         <div className="flex items-center justify-between w-full gap-8 overflow-visible">
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <img src="/attached_assets/Government_of_India_logo.svg" alt="Government of India" className="h-20 w-auto object-contain" style={{ display: 'block' }} />
+            <img src="/attached_assets/Government_of_India_logo.svg" alt="Government of India" className="h-20 w-auto object-contain" />
           </div>
-
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
-            <img src="/attached_assets/Ministry_of_Education_India.svg" alt="Ministry of Education" className="h-20 w-auto object-contain" style={{ display: 'block' }} />
+            <img src="/attached_assets/Ministry_of_Education_India.svg" alt="Ministry of Education" className="h-20 w-auto object-contain" />
           </div>
-
           <div className="flex-1 flex items-center justify-center gap-4 border-r pr-8 overflow-visible">
             <img src="/attached_assets/innovation_cell_logo.png" alt="Innovation Cell" className="h-20 w-auto object-contain min-w-[140px]" />
           </div>
-
           <div className="flex-1 flex items-center justify-center overflow-visible">
             <img src="/attached_assets/statathon_logo.png" alt="Statathon 2025" className="h-20 w-auto object-contain min-w-[180px]" />
           </div>
@@ -86,135 +53,68 @@ export default function AuthPage() {
       </header>
 
       <div className="flex-1 flex flex-col lg:flex-row-reverse h-full overflow-y-auto">
+        {/* ── Right: Login form ── */}
         <div className="flex-1 flex flex-col items-center justify-start pt-8 p-8 bg-white dark:bg-slate-900 overflow-visible lg:border-l lg:border-slate-200 lg:dark:border-slate-800 relative">
           <div className="absolute top-4 right-4 flex flex-col items-end text-right">
-            <img 
-              src="/sih-logo.png" 
-              alt="SIH 2024" 
-              className="h-16 w-auto object-contain mb-1.5"
-            />
+            <img src="/sih-logo.png" alt="SIH 2024" className="h-16 w-auto object-contain mb-1.5" />
             <span className="text-base font-bold text-slate-500 dark:text-slate-400">SIH1693</span>
             <span className="text-sm font-bold text-black uppercase tracking-tight">SIH 2024 WINNER</span>
           </div>
+
           <div className="w-full max-w-md space-y-0">
             <div className="text-center space-y-0">
               <div className="flex flex-col items-center justify-center">
-                <img 
-                  src="/attached_assets/airavata_logo_large.png" 
-                  alt="AIRAVATA" 
-                  className="h-[240px] w-auto object-contain" 
-                  data-testid="img-airavata-logo"
-                />
+                <img src="/attached_assets/airavata_logo_large.png" alt="AIRAVATA" className="h-[240px] w-auto object-contain" data-testid="img-airavata-logo" />
               </div>
             </div>
-            
-            <div className="bg-white dark:bg-slate-900 p-2 min-h-[380px]">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-                <TabsList className="grid w-full grid-cols-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg shrink-0">
-                  <TabsTrigger value="login" className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700">Login</TabsTrigger>
-                  <TabsTrigger value="register" className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700">Register</TabsTrigger>
-                </TabsList>
-                
-                <div className="flex-1 relative">
-                  <TabsContent value="login" className="mt-6 absolute inset-x-0 top-0 data-[state=inactive]:hidden">
-                    <Form {...loginForm}>
-                      <form onSubmit={loginForm.handleSubmit(onLogin)} className="space-y-6">
-                        <FormField
-                          control={loginForm.control}
-                          name="username"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Username</FormLabel>
-                              <FormControl><Input placeholder="Username" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={loginForm.control}
-                          name="password"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Password</FormLabel>
-                              <FormControl><Input type="password" placeholder="Password" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <Button type="submit" className="w-full h-11" disabled={loginMutation.isPending}>
-                          {loginMutation.isPending ? <Loader2 className="animate-spin" /> : "Sign In"}
-                        </Button>
-                      </form>
-                    </Form>
-                  </TabsContent>
 
-                  <TabsContent value="register" className="mt-6 absolute inset-x-0 top-0 data-[state=inactive]:hidden">
-                    <Form {...registerForm}>
-                      <form onSubmit={registerForm.handleSubmit(onRegister)} className="space-y-6">
-                        <FormField
-                          control={registerForm.control}
-                          name="fullName"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Full Name</FormLabel>
-                              <FormControl><Input placeholder="Full Name" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={registerForm.control}
-                          name="email"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Email</FormLabel>
-                              <FormControl><Input type="email" placeholder="Email" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={registerForm.control}
-                          name="username"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Username</FormLabel>
-                              <FormControl><Input placeholder="Username" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={registerForm.control}
-                          name="password"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Password</FormLabel>
-                              <FormControl><Input type="password" placeholder="Password" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <Button type="submit" className="w-full h-11" disabled={registerMutation.isPending}>
-                          {registerMutation.isPending ? <Loader2 className="animate-spin" /> : "Create Account"}
-                        </Button>
-                      </form>
-                    </Form>
-                  </TabsContent>
+            <div className="bg-white dark:bg-slate-900 p-2">
+              <div className="mb-6">
+                <div className="w-full bg-slate-100 dark:bg-slate-800 p-1 rounded-lg flex">
+                  <div className="flex-1 py-1.5 text-center text-sm font-medium bg-white dark:bg-slate-700 rounded-md shadow-sm text-slate-900 dark:text-white">
+                    Login
+                  </div>
                 </div>
-              </Tabs>
+              </div>
+
+              <Form {...loginForm}>
+                <form onSubmit={loginForm.handleSubmit(onLogin)} className="space-y-6">
+                  <FormField
+                    control={loginForm.control}
+                    name="username"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Username</FormLabel>
+                        <FormControl><Input placeholder="Username" data-testid="input-username" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={loginForm.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Password</FormLabel>
+                        <FormControl><Input type="password" placeholder="Password" data-testid="input-password" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" className="w-full h-11" disabled={loginMutation.isPending} data-testid="button-sign-in">
+                    {loginMutation.isPending ? <Loader2 className="animate-spin" /> : "Sign In"}
+                  </Button>
+                </form>
+              </Form>
             </div>
           </div>
         </div>
 
+        {/* ── Left: Branding panel ── */}
         <div className="hidden lg:flex flex-1 items-center justify-center p-12 bg-white dark:bg-slate-900">
           <div className="max-w-2xl text-slate-900 dark:text-white w-full">
             <div className="flex flex-col items-center text-center mb-12">
-              <img 
-                src="/attached_assets/mospi_logo_large.png" 
-                alt="MoSPI Government of India" 
-                className="h-32 w-auto object-contain mb-12" 
-              />
+              <img src="/attached_assets/mospi_logo_large.png" alt="MoSPI Government of India" className="h-32 w-auto object-contain mb-12" />
               <div className="space-y-6 w-full">
                 <div className="p-8 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
                   <div className="grid grid-cols-1 gap-6 text-left">
@@ -250,19 +150,11 @@ export default function AuthPage() {
             Developed by <a href="https://www.airavatatechnologies.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">AIRAVATA TECHNOLOGIES</a>
           </span>
           <span className="text-black font-bold">|</span>
-          <a 
-            href="https://www.airavatatechnologies.com/" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="text-black hover:text-blue-600 transition-colors underline underline-offset-4 whitespace-nowrap font-medium"
-          >
+          <a href="https://www.airavatatechnologies.com/" target="_blank" rel="noopener noreferrer" className="text-black hover:text-blue-600 transition-colors underline underline-offset-4 whitespace-nowrap font-medium">
             www.airavatatechnologies.com
           </a>
           <span className="text-black font-bold">|</span>
-          <a 
-            href="mailto:info@airavatatechnologies.com" 
-            className="text-black hover:text-blue-600 transition-colors underline underline-offset-4 whitespace-nowrap font-medium"
-          >
+          <a href="mailto:info@airavatatechnologies.com" className="text-black hover:text-blue-600 transition-colors underline underline-offset-4 whitespace-nowrap font-medium">
             info@airavatatechnologies.com
           </a>
         </div>

@@ -1265,5 +1265,147 @@ export async function registerRoutes(
     }
   });
 
+  // ── Master-only middleware ────────────────────────────────────────────────
+  function requireMaster(req: Request, res: Response, next: NextFunction) {
+    if (!req.isAuthenticated()) return res.status(401).send("Unauthorized");
+    const role = (req.user as any)?.role;
+    if (role !== "master" && role !== "admin") return res.status(403).send("Forbidden: Master access required");
+    next();
+  }
+
+  // ── Admin: User Management ────────────────────────────────────────────────
+  app.get("/api/admin/users", requireMaster, async (req, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      // Never expose passwords
+      const safe = users.map(({ password: _pw, ...u }) => u);
+      res.json(safe);
+    } catch (error) {
+      res.status(500).send("Failed to get users");
+    }
+  });
+
+  app.post("/api/admin/users", requireMaster, async (req, res) => {
+    try {
+      const { username, password, email, fullName, role, department, permissions } = req.body;
+      if (!username || !password || !email || !fullName || !role) {
+        return res.status(400).send("Missing required fields");
+      }
+      const existing = await storage.getUserByUsername(username);
+      if (existing) return res.status(400).send("Username already exists");
+
+      const user = await storage.createUser({
+        username,
+        password: await hashPassword(password),
+        email,
+        fullName,
+        role,
+        department: department || "",
+        permissions: permissions || ["data_upload", "risk_assessment", "privacy_enhancement", "utility_measurement", "report_generation"],
+      });
+      const { password: _pw, ...safe } = user;
+      res.status(201).json(safe);
+    } catch (error) {
+      res.status(500).send("Failed to create user");
+    }
+  });
+
+  app.put("/api/admin/users/:id", requireMaster, async (req, res) => {
+    try {
+      const { password, ...updates } = req.body;
+      const data: any = { ...updates };
+      if (password) data.password = await hashPassword(password);
+      const user = await storage.updateUser(req.params.id, data);
+      if (!user) return res.status(404).send("User not found");
+      const { password: _pw, ...safe } = user;
+      res.json(safe);
+    } catch (error) {
+      res.status(500).send("Failed to update user");
+    }
+  });
+
+  app.delete("/api/admin/users/:id", requireMaster, async (req, res) => {
+    try {
+      if (req.params.id === (req.user as any).id) {
+        return res.status(400).send("Cannot delete your own account");
+      }
+      await storage.deleteUser(req.params.id);
+      res.sendStatus(200);
+    } catch (error) {
+      res.status(500).send("Failed to delete user");
+    }
+  });
+
+  // ── Admin: File Sharing ───────────────────────────────────────────────────
+  app.get("/api/admin/shares", requireMaster, async (req, res) => {
+    try {
+      const shares = await storage.getSharedFilesByOwner((req.user as any).id);
+      // Also enrich with sharedWith user info
+      const users = await storage.getAllUsers();
+      const userMap = new Map(users.map((u) => [u.id, u]));
+      const enriched = shares.map((s) => ({
+        ...s,
+        sharedWithUser: userMap.get(s.sharedWithUserId)
+          ? { fullName: userMap.get(s.sharedWithUserId)!.fullName, username: userMap.get(s.sharedWithUserId)!.username, role: userMap.get(s.sharedWithUserId)!.role }
+          : null,
+      }));
+      res.json(enriched);
+    } catch (error) {
+      res.status(500).send("Failed to get shares");
+    }
+  });
+
+  app.post("/api/admin/share", requireMaster, async (req, res) => {
+    try {
+      const { privacyOperationId, sharedWithUserId, note } = req.body;
+      if (!privacyOperationId || !sharedWithUserId) return res.status(400).send("Missing required fields");
+
+      const operation = await storage.getPrivacyOperation(privacyOperationId);
+      if (!operation) return res.status(404).send("Privacy operation not found");
+
+      const dataset = await storage.getDataset(operation.datasetId);
+
+      const share = await storage.createSharedFile({
+        privacyOperationId,
+        sharedByUserId: (req.user as any).id,
+        sharedWithUserId,
+        note: note || null,
+        datasetName: dataset?.originalName || "Unknown Dataset",
+        technique: operation.technique,
+      });
+      res.status(201).json(share);
+    } catch (error) {
+      res.status(500).send("Failed to share file");
+    }
+  });
+
+  app.delete("/api/admin/shares/:id", requireMaster, async (req, res) => {
+    try {
+      await storage.deleteSharedFile(req.params.id);
+      res.sendStatus(200);
+    } catch (error) {
+      res.status(500).send("Failed to delete share");
+    }
+  });
+
+  // ── Researcher: Get shared files ──────────────────────────────────────────
+  app.get("/api/researcher/files", requireAuth, async (req, res) => {
+    try {
+      const shares = await storage.getSharedFilesForUser((req.user as any).id);
+      // Enrich with sharedBy user info
+      const users = await storage.getAllUsers();
+      const userMap = new Map(users.map((u) => [u.id, u]));
+      const enriched = shares.map((s) => ({
+        ...s,
+        sharedByUser: userMap.get(s.sharedByUserId)
+          ? { fullName: userMap.get(s.sharedByUserId)!.fullName, username: userMap.get(s.sharedByUserId)!.username }
+          : null,
+      }));
+      res.json(enriched);
+    } catch (error) {
+      res.status(500).send("Failed to get shared files");
+    }
+  });
+
   return httpServer;
 }

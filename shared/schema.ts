@@ -254,6 +254,29 @@ export const insertActivityLogSchema = z.object({
   details: z.any().optional().nullable(),
 });
 
+// ── SharedFile ────────────────────────────────────────────────────────────────
+export interface SharedFile {
+  id: string;
+  privacyOperationId: string;
+  sharedByUserId: string;
+  sharedWithUserId: string;
+  note?: string | null;
+  datasetName?: string | null;
+  technique?: string | null;
+  sharedAt?: Date;
+}
+
+export type InsertSharedFile = Omit<SharedFile, "id" | "sharedAt">;
+
+export const insertSharedFileSchema = z.object({
+  privacyOperationId: z.string(),
+  sharedByUserId: z.string(),
+  sharedWithUserId: z.string(),
+  note: z.string().optional().nullable(),
+  datasetName: z.string().optional().nullable(),
+  technique: z.string().optional().nullable(),
+});
+
 // ── Login schema ──────────────────────────────────────────────────────────────
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),

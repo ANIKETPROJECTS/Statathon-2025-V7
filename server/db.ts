@@ -179,6 +179,21 @@ const configProfileSchema = new Schema(
 
 export const ConfigProfileModel = model("ConfigProfile", configProfileSchema);
 
+// ── SharedFile ────────────────────────────────────────────────────────────────
+const sharedFileSchema = new Schema(
+  {
+    privacyOperationId: { type: Schema.Types.ObjectId, ref: "PrivacyOperation", required: true },
+    sharedByUserId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    sharedWithUserId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    note: { type: String, default: null },
+    datasetName: { type: String, default: null },
+    technique: { type: String, default: null },
+  },
+  { timestamps: { createdAt: "sharedAt", updatedAt: false }, toJSON, toObject: toJSON }
+);
+
+export const SharedFileModel = model("SharedFile", sharedFileSchema);
+
 // ── ActivityLog ───────────────────────────────────────────────────────────────
 const activityLogSchema = new Schema(
   {
