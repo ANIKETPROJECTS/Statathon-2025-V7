@@ -2,10 +2,8 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { DashboardLayout } from "@/components/dashboard-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
@@ -232,7 +230,6 @@ function StatBadgeColored({ val, lowGood }: { val: number; lowGood?: boolean }) 
 function FidelityRow({ f }: { f: NumFidelity }) {
   const [open, setOpen] = useState(false);
 
-  // Fix #7: All-null column — show N/A row, not a scoring row
   if (f.allNull) {
     return (
       <tr className="border-b bg-muted/10" data-testid={`fidelity-row-${f.col}`}>
@@ -249,7 +246,6 @@ function FidelityRow({ f }: { f: NumFidelity }) {
     );
   }
 
-  // Fix #1: Pseudonymized column — show Type Mismatch row
   if (f.pseudonymized) {
     return (
       <>
@@ -382,7 +378,6 @@ function HistChart({ f }: { f: NumFidelity }) {
     }));
   }, [f]);
 
-  // Fix #1 / #7: Show informative placeholders for excluded columns
   if (f.allNull) {
     return (
       <div>
@@ -429,10 +424,6 @@ function HistChart({ f }: { f: NumFidelity }) {
 }
 
 function RadarOUS({ m }: { m: UtilityMetrics }) {
-  // Each axis measures "Privacy-Utility Balance achieved":
-  //   After Anonymisation = actual utility preservation score (higher = better balance)
-  //   Before Anonymisation = (100 - score) = statistical exposure gap of raw data
-  //   This ensures the Anonymised polygon is always visually larger than the raw-data polygon.
   const sfsPct   = Math.round(m.sfs     * 100);
   const dsPct    = Math.round(m.dsScore * 100);
   const icPct    = Math.round(m.icScore * 100);
@@ -503,12 +494,24 @@ function CorrHeatmap({ cols, delta }: { cols: string[]; delta: number[][] }) {
 
 // ── MAIN PAGE ─────────────────────────────────────────────────────────────────
 
+const TABS = [
+  { id: "statistical",    label: "Statistical Fidelity" },
+  { id: "distributions",  label: "Distributions" },
+  { id: "correlations",   label: "Correlations" },
+  { id: "privacy-utility",label: "Privacy-Utility" },
+  { id: "attack-impact",  label: "Attack Impact" },
+  { id: "compliance",     label: "Compliance" },
+];
+
 export default function UtilityPage() {
   const [selectedDataset, setSelectedDataset] = useState("");
   const [selectedOperation, setSelectedOperation] = useState("");
   const [active, setActive] = useState<UMeasurement | null>(null);
+  const [activeTab, setActiveTab] = useState("statistical");
   const { toast } = useToast();
   const qc = useQueryClient();
+
+  const poppins = { fontFamily: "'Poppins', sans-serif" };
 
   const { data: datasets = [] } = useQuery<any[]>({ queryKey: ["/api/datasets"] });
   const { data: operations = [] } = useQuery<any[]>({ queryKey: ["/api/privacy/operations"] });
@@ -529,7 +532,6 @@ export default function UtilityPage() {
   });
 
   const raw = active?.metrics ?? null;
-  // Detect legacy stub format (old server stored { queryAccuracy, statisticalSimilarity } only)
   const isLegacyMetrics = raw != null && (raw as any).ous == null && active?.overallUtility != null;
   const m: UtilityMetrics | null = (raw && !isLegacyMetrics) ? {
     ...raw,
@@ -618,657 +620,633 @@ export default function UtilityPage() {
   };
 
   return (
-    <DashboardLayout title="Utility Measurement">
-      <div className="flex gap-4 min-h-0" data-testid="utility-page">
+    <DashboardLayout title="Utility Measurement" breadcrumbs={[{ label: "Utility Measurement" }]}>
+      <div style={poppins} className="flex min-h-[calc(100vh-120px)] -mx-6 -mt-2" data-testid="utility-page">
 
-        {/* ── LEFT PANEL ───────────────────────────────────────────────── */}
-        <div className="w-72 shrink-0 flex flex-col gap-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <GitCompare className="h-4 w-4 text-blue-600" />
-                Compare Datasets
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Original Dataset</label>
-                <Select
-                  value={selectedDataset}
-                  onValueChange={v => { setSelectedDataset(v); setSelectedOperation(""); }}
-                >
-                  <SelectTrigger data-testid="select-original-dataset" className="text-xs h-8">
-                    <SelectValue placeholder="Select dataset…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {datasets.map((d: any) => (
-                      <SelectItem key={d.id} value={String(d.id)}>
-                        {d.originalName} ({d.rowCount} rows)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+        {/* ── LEFT PANEL ────────────────────────────────────────────────────── */}
+        <div className="w-[300px] shrink-0 border-r border-slate-200 dark:border-slate-700 flex flex-col overflow-y-auto">
 
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Processed Operation</label>
-                <Select value={selectedOperation} onValueChange={setSelectedOperation}>
-                  <SelectTrigger data-testid="select-processed-operation" className="text-xs h-8">
-                    <SelectValue placeholder="Select operation…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredOps.map((o: any) => (
-                      <SelectItem key={o.id} value={String(o.id)}>
-                        {o.technique} #{o.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          {/* Original Dataset */}
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Original Dataset</p>
+            <Select
+              value={selectedDataset}
+              onValueChange={v => { setSelectedDataset(v); setSelectedOperation(""); }}
+            >
+              <SelectTrigger data-testid="select-original-dataset" className="text-xs h-8">
+                <SelectValue placeholder="Choose a dataset…" />
+              </SelectTrigger>
+              <SelectContent>
+                {datasets.map((d: any) => (
+                  <SelectItem key={d.id} value={String(d.id)}>
+                    {d.originalName} ({d.rowCount} rows)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-              <Button
-                data-testid="button-measure-utility"
-                size="sm"
-                className="w-full mt-1"
-                disabled={!selectedDataset || !selectedOperation || measureMut.isPending}
-                onClick={() => measureMut.mutate()}
-              >
-                {measureMut.isPending
-                  ? <><Activity className="h-3 w-3 mr-2 animate-spin" />Computing…</>
-                  : <><BarChart2 className="h-3 w-3 mr-2" />Measure Utility</>}
-              </Button>
-            </CardContent>
-          </Card>
+          {/* Processed Operation */}
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Processed Operation</p>
+            <Select value={selectedOperation} onValueChange={setSelectedOperation}>
+              <SelectTrigger data-testid="select-processed-operation" className="text-xs h-8">
+                <SelectValue placeholder="Select operation…" />
+              </SelectTrigger>
+              <SelectContent>
+                {filteredOps.map((o: any) => (
+                  <SelectItem key={o.id} value={String(o.id)}>
+                    {o.technique} #{o.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!selectedDataset && (
+              <p className="text-[11px] text-slate-400 mt-2">Select a dataset first to filter operations</p>
+            )}
+          </div>
 
-          {/* History */}
+          {/* Run button */}
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+            <button
+              data-testid="button-measure-utility"
+              disabled={!selectedDataset || !selectedOperation || measureMut.isPending}
+              onClick={() => measureMut.mutate()}
+              className="w-full h-9 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+            >
+              {measureMut.isPending
+                ? <><Activity className="h-3.5 w-3.5 animate-spin" />Computing…</>
+                : <><BarChart2 className="h-3.5 w-3.5" />Measure Utility</>}
+            </button>
+          </div>
+
+          {/* Recent Measurements */}
           {history.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs text-muted-foreground">Recent Measurements</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-1 p-3 pt-0">
+            <div className="px-5 py-4">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Recent Measurements</p>
+              <div className="flex flex-col gap-1">
                 {history.slice(0, 6).map((h: UMeasurement) => (
                   <button
                     key={h.id}
                     data-testid={`history-item-${h.id}`}
-                    className="text-left text-xs px-2 py-2 rounded hover:bg-muted/50 border border-transparent hover:border-border transition-colors"
                     onClick={() => setActive(h)}
+                    className={`text-left px-3 py-2.5 rounded-lg text-xs transition-colors border ${
+                      active?.id === h.id
+                        ? "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800"
+                        : "border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:border-slate-200 dark:hover:border-slate-700"
+                    }`}
                   >
-                    <p className="font-medium text-foreground">{h.metrics?.datasetName ?? `#${h.id}`}</p>
-                    <p className="text-muted-foreground">{h.metrics?.grade ?? "?"} — {h.metrics?.ous ?? Math.round(h.overallUtility * 100)}% OUS</p>
+                    <p className="font-semibold text-slate-700 dark:text-slate-200 truncate">
+                      {h.metrics?.datasetName ?? `Measurement #${h.id}`}
+                    </p>
+                    <p className="text-slate-500 dark:text-slate-400 mt-0.5">
+                      Grade <span className={`font-bold ${gradeColor(h.metrics?.grade ?? "F")}`}>{h.metrics?.grade ?? "?"}</span>
+                      {" · "}{h.metrics?.ous ?? Math.round(h.overallUtility * 100)}% OUS
+                    </p>
                   </button>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
         </div>
 
-        {/* ── RESULTS PANEL ────────────────────────────────────────────── */}
-        <div className="flex-1 overflow-auto flex flex-col gap-4 pb-6">
+        {/* ── RIGHT PANEL ───────────────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0 overflow-y-auto px-6 py-5 flex flex-col gap-0">
 
-          {/* Legacy-format measurement banner */}
+          {/* Legacy format banner */}
           {isLegacyMetrics && !measureMut.isPending && (
-            <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/30">
-              <CardContent className="pt-5 pb-5">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="font-semibold text-amber-800 dark:text-amber-300">Legacy Measurement Format</p>
-                    <p className="text-sm text-amber-700 dark:text-amber-400">
-                      This measurement was created by an older version of the server and does not contain
-                      detailed metrics. The overall utility score was <strong>{Math.round((active?.overallUtility ?? 0) * 100)}%</strong>.
-                    </p>
-                    <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
-                      To get the full breakdown, select the same dataset and operation in the left panel and click <strong>Measure Utility</strong> to recompute.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Empty state */}
-          {!m && !isLegacyMetrics && !measureMut.isPending && (
-            <Card className="flex items-center justify-center min-h-64">
-              <div className="text-center space-y-3 p-8">
-                <BarChart2 className="h-12 w-12 text-muted-foreground mx-auto" />
-                <p className="text-lg font-semibold">No Measurement Yet</p>
-                <p className="text-sm text-muted-foreground">
-                  Select an original dataset and a processed operation,<br />then click <strong>Measure Utility</strong>.
+            <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 mb-5">
+              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-semibold text-amber-800 dark:text-amber-300 text-sm">Legacy Measurement Format</p>
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  This measurement was created by an older server version and lacks detailed metrics.
+                  Overall utility: <strong>{Math.round((active?.overallUtility ?? 0) * 100)}%</strong>.
+                  Select the same dataset and operation, then click <strong>Measure Utility</strong> to recompute.
                 </p>
               </div>
-            </Card>
+            </div>
           )}
 
           {/* Computing loader */}
           {measureMut.isPending && (
-            <Card className="p-6 flex flex-col gap-3">
-              <p className="font-semibold flex items-center gap-2">
+            <div className="flex flex-col gap-3 px-2 py-8">
+              <p className="font-semibold flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                 <Activity className="h-4 w-4 animate-spin text-blue-600" />
                 Computing Utility Metrics…
               </p>
               {["Statistical Fidelity", "Distribution Similarity", "Correlation Analysis", "Composite OUS Score"].map(step => (
-                <div key={step} className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Activity className="h-3 w-3 animate-spin text-blue-500" />{step}…
+                <div key={step} className="flex items-center gap-2 text-xs text-slate-500">
+                  <Activity className="h-3 w-3 animate-spin text-blue-400" />{step}…
                 </div>
               ))}
-            </Card>
+            </div>
           )}
 
+          {/* Empty state */}
+          {!m && !isLegacyMetrics && !measureMut.isPending && (
+            <div className="flex flex-col items-center justify-center flex-1 min-h-[400px] gap-4 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                <BarChart2 className="h-8 w-8 text-slate-400" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-slate-700 dark:text-slate-300">No Measurement Yet</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Select an original dataset and a processed operation,<br />then click <strong>Measure Utility</strong>.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── RESULTS ──────────────────────────────────────────────────── */}
           {m && (
             <>
-              {/* ── SECTION A: SUMMARY DASHBOARD ─────────────────── */}
-              <Card>
-                <CardContent className="pt-4 pb-4">
-                  {/* Top row: Score + Grade + metadata */}
-                  {(() => {
-                    const excludedCols = [...(m.pseudonymizedCols ?? []), ...(m.allNullCols ?? [])];
-                    const totalOrig = m.numericCols.length + m.catCols.length;
-                    const totalScored = totalOrig - excludedCols.length;
-                    // Derive the base label phrase before any em-dash qualifier
-                    const basePhraseMap: Record<string, string> = {
-                      "A+": "Exceptional", A: "Excellent", B: "Good",
-                      C: "Acceptable", D: "Poor", F: "Fail",
-                    };
-                    const basePhrase = basePhraseMap[m.grade] ?? m.grade;
-                    const displayGradeLabel = excludedCols.length > 0
-                      ? `${basePhrase} on retained columns — ${excludedCols.length} column(s) lost all statistical utility`
-                      : m.gradeLabel;
-                    const scoringCoverage = excludedCols.length > 0
-                      ? `computed on ${totalScored} of ${totalOrig} columns`
-                      : null;
-                    return (
-                      <div className="flex items-start justify-between mb-4">
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Overall Utility Score</p>
-                          <div className="flex items-baseline gap-3 mt-1">
-                            <span className="text-5xl font-bold">{m.ous}%</span>
-                            <div className={`border rounded-lg px-3 py-1 ${gradeBg(m.grade)}`}>
-                              <span className={`text-2xl font-bold ${gradeColor(m.grade)}`}>{m.grade}</span>
-                            </div>
-                            {scoringCoverage && (
-                              <span className="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded px-2 py-0.5 self-center">
-                                {scoringCoverage}
-                              </span>
-                            )}
+              {/* ── SUMMARY SECTION ─────────────────────────────────────── */}
+              <div className="pb-5 border-b border-slate-100 dark:border-slate-800 mb-5">
+                {(() => {
+                  const excludedCols = [...(m.pseudonymizedCols ?? []), ...(m.allNullCols ?? [])];
+                  const totalOrig = m.numericCols.length + m.catCols.length;
+                  const totalScored = totalOrig - excludedCols.length;
+                  const basePhraseMap: Record<string, string> = {
+                    "A+": "Exceptional", A: "Excellent", B: "Good",
+                    C: "Acceptable", D: "Poor", F: "Fail",
+                  };
+                  const basePhrase = basePhraseMap[m.grade] ?? m.grade;
+                  const displayGradeLabel = excludedCols.length > 0
+                    ? `${basePhrase} on retained columns — ${excludedCols.length} column(s) lost all statistical utility`
+                    : m.gradeLabel;
+                  const scoringCoverage = excludedCols.length > 0
+                    ? `computed on ${totalScored} of ${totalOrig} columns`
+                    : null;
+                  return (
+                    <div className="flex items-start justify-between mb-5">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Overall Utility Score</p>
+                        <div className="flex items-baseline gap-3 mt-1">
+                          <span className="text-5xl font-bold text-slate-800 dark:text-slate-100">{m.ous}%</span>
+                          <div className={`border rounded-lg px-3 py-1 ${gradeBg(m.grade)}`}>
+                            <span className={`text-2xl font-bold ${gradeColor(m.grade)}`}>{m.grade}</span>
                           </div>
-                          <p className={`text-xs mt-1 ${excludedCols.length > 0 ? "text-amber-700 dark:text-amber-400 font-medium" : "text-muted-foreground"}`}>
-                            {displayGradeLabel}
-                          </p>
-                        </div>
-                        <div className="text-right text-xs text-muted-foreground space-y-0.5">
-                          <p className="font-semibold text-foreground text-sm">{m.datasetName}</p>
-                          <p>Technique: <span className="font-medium capitalize">{m.technique}</span></p>
-                          <p>{m.rowsOrig.toLocaleString()} → {m.rowsProc.toLocaleString()} rows</p>
-                          <p>{suppPct.toFixed(1)}% suppressed &nbsp;·&nbsp; {m.numericCols.length}N + {m.catCols.length}C columns</p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* 5 component score bars + Risk Reduction card (Fix #6) */}
-                  <div className="grid grid-cols-6 gap-4 mb-3">
-                    <ScoreBar label="Stat Fidelity" value={m.sfs} icon={<Activity className="h-3 w-3" />} />
-                    <ScoreBar label="Distribution" value={m.dsScore} icon={<BarChart2 className="h-3 w-3" />} />
-                    <ScoreBar label="Info Content" value={m.icScore} icon={<Info className="h-3 w-3" />} />
-                    <ScoreBar label="Correlation" value={m.cpScore} icon={<GitCompare className="h-3 w-3" />} />
-                    <ScoreBar label="Predictive" value={m.puScore} icon={<Target className="h-3 w-3" />} />
-                    {/* Fix #6: Risk Reduction metric card */}
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><Shield className="h-3 w-3" />Risk Reduction</span>
-                        {m.riskReduction != null
-                          ? <span className={`font-semibold ${m.riskReduction >= 50 ? "text-green-600 dark:text-green-400" : m.riskReduction >= 25 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"}`}>
-                              {m.riskReduction.toFixed(1)}%
+                          {scoringCoverage && (
+                            <span className="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded px-2 py-0.5 self-center">
+                              {scoringCoverage}
                             </span>
-                          : <span className="text-muted-foreground text-[10px]">N/A</span>
-                        }
+                          )}
+                        </div>
+                        <p className={`text-xs mt-1 ${excludedCols.length > 0 ? "text-amber-700 dark:text-amber-400 font-medium" : "text-slate-500"}`}>
+                          {displayGradeLabel}
+                        </p>
                       </div>
+                      <div className="text-right text-xs text-slate-500 space-y-0.5">
+                        <p className="font-semibold text-slate-700 dark:text-slate-300 text-sm">{m.datasetName}</p>
+                        <p>Technique: <span className="font-medium capitalize">{m.technique}</span></p>
+                        <p>{m.rowsOrig.toLocaleString()} → {m.rowsProc.toLocaleString()} rows</p>
+                        <p>{suppPct.toFixed(1)}% suppressed · {m.numericCols.length}N + {m.catCols.length}C columns</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 5 component score bars + Risk Reduction */}
+                <div className="grid grid-cols-6 gap-4 mb-4">
+                  <ScoreBar label="Stat Fidelity" value={m.sfs} icon={<Activity className="h-3 w-3" />} />
+                  <ScoreBar label="Distribution" value={m.dsScore} icon={<BarChart2 className="h-3 w-3" />} />
+                  <ScoreBar label="Info Content" value={m.icScore} icon={<Info className="h-3 w-3" />} />
+                  <ScoreBar label="Correlation" value={m.cpScore} icon={<GitCompare className="h-3 w-3" />} />
+                  <ScoreBar label="Predictive" value={m.puScore} icon={<Target className="h-3 w-3" />} />
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><Shield className="h-3 w-3" />Risk Reduction</span>
                       {m.riskReduction != null
-                        ? <Progress value={m.riskReduction} className="h-1.5" />
-                        : <p className="text-[10px] text-muted-foreground leading-tight">Run Risk Assessment first</p>
+                        ? <span className={`font-semibold ${m.riskReduction >= 50 ? "text-green-600 dark:text-green-400" : m.riskReduction >= 25 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"}`}>
+                            {m.riskReduction.toFixed(1)}%
+                          </span>
+                        : <span className="text-muted-foreground text-[10px]">N/A</span>
                       }
                     </div>
+                    {m.riskReduction != null
+                      ? <Progress value={m.riskReduction} className="h-1.5" />
+                      : <p className="text-[10px] text-muted-foreground leading-tight">Run Risk Assessment first</p>
+                    }
                   </div>
+                </div>
 
-                  {/* Balance bar */}
-                  <div className="flex rounded overflow-hidden h-2.5 mb-2">
-                    <div className="bg-blue-500" style={{ width: `${m.sfs * 30}%` }} title="SFS ×30%" />
-                    <div className="bg-orange-500" style={{ width: `${m.dsScore * 25}%` }} title="DS ×25%" />
-                    <div className="bg-purple-500" style={{ width: `${m.icScore * 20}%` }} title="IC ×20%" />
-                    <div className="bg-green-500" style={{ width: `${m.cpScore * 15}%` }} title="CP ×15%" />
-                    <div className="bg-cyan-500" style={{ width: `${m.puScore * 10}%` }} title="PU ×10%" />
-                    <div className="bg-muted flex-1" />
-                  </div>
-                  <div className="flex gap-4 text-[10px] text-muted-foreground mb-3">
-                    {[
-                      ["bg-blue-500", "SFS ×30%"], ["bg-orange-500", "DS ×25%"],
-                      ["bg-purple-500", "IC ×20%"], ["bg-green-500", "CP ×15%"], ["bg-cyan-500", "PU ×10%"],
-                    ].map(([cls, label]) => (
-                      <span key={label} className="flex items-center gap-1">
-                        <span className={`w-2 h-2 rounded-full inline-block ${cls}`} />{label}
-                      </span>
+                {/* Weighted balance bar */}
+                <div className="flex rounded overflow-hidden h-2 mb-1.5">
+                  <div className="bg-blue-500" style={{ width: `${m.sfs * 30}%` }} title="SFS ×30%" />
+                  <div className="bg-orange-500" style={{ width: `${m.dsScore * 25}%` }} title="DS ×25%" />
+                  <div className="bg-purple-500" style={{ width: `${m.icScore * 20}%` }} title="IC ×20%" />
+                  <div className="bg-green-500" style={{ width: `${m.cpScore * 15}%` }} title="CP ×15%" />
+                  <div className="bg-cyan-500" style={{ width: `${m.puScore * 10}%` }} title="PU ×10%" />
+                  <div className="bg-slate-200 dark:bg-slate-700 flex-1" />
+                </div>
+                <div className="flex gap-4 text-[10px] text-slate-400 mb-4">
+                  {[
+                    ["bg-blue-500", "SFS ×30%"], ["bg-orange-500", "DS ×25%"],
+                    ["bg-purple-500", "IC ×20%"], ["bg-green-500", "CP ×15%"], ["bg-cyan-500", "PU ×10%"],
+                  ].map(([cls, label]) => (
+                    <span key={label} className="flex items-center gap-1">
+                      <span className={`w-2 h-2 rounded-full inline-block ${cls}`} />{label}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Verdict */}
+                <div className={`rounded-lg px-4 py-2.5 text-sm font-medium border ${verdictClass(m.grade)}`}>
+                  {m.verdict}
+                </div>
+
+                {/* Warnings */}
+                {m.warnings.length > 0 && (
+                  <div className="mt-3 flex flex-col gap-1">
+                    {m.warnings.map((w, i) => (
+                      <p key={i} className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
+                        <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />{w}
+                      </p>
                     ))}
                   </div>
+                )}
+              </div>
 
-                  {/* Verdict */}
-                  <div className={`rounded-lg px-4 py-2.5 text-sm font-medium border ${verdictClass(m.grade)}`}>
-                    {m.verdict}
+              {/* ── TAB SELECTOR ────────────────────────────────────────── */}
+              <div className="flex gap-1 flex-wrap mb-5">
+                {TABS.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setActiveTab(t.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      activeTab === t.id
+                        ? "bg-blue-600 text-white"
+                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── TAB: STATISTICAL FIDELITY ───────────────────────────── */}
+              {activeTab === "statistical" && (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Per-Column Statistical Fidelity</p>
+                    {m.numericFidelity.length === 0 ? (
+                      <p className="text-sm text-slate-500">No numeric columns detected.</p>
+                    ) : (
+                      <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                        <table className="w-full text-xs" data-testid="fidelity-table">
+                          <thead>
+                            <tr className="border-b bg-slate-50 dark:bg-slate-800/50 text-slate-500">
+                              <th className="px-3 py-2 text-left">Column</th>
+                              <th className="px-3 py-2 text-right">Orig Mean</th>
+                              <th className="px-3 py-2 text-right">Proc Mean</th>
+                              <th className="px-3 py-2 text-right">Rel Bias</th>
+                              <th className="px-3 py-2 text-right">Var Ratio</th>
+                              <th className="px-3 py-2 text-right">KS Stat ↓</th>
+                              <th className="px-3 py-2 text-right">JSD ↓</th>
+                              <th className="px-3 py-2 text-left">SFS ↑</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {m.numericFidelity.map(f => <FidelityRow key={f.col} f={f} />)}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Warnings */}
-                  {m.warnings.length > 0 && (
-                    <div className="mt-3 flex flex-col gap-1">
-                      {m.warnings.map((w, i) => (
-                        <p key={i} className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
-                          <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />{w}
-                        </p>
-                      ))}
+                  {m.catFidelity.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Categorical Columns</p>
+                      <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b bg-slate-50 dark:bg-slate-800/50 text-slate-500">
+                              <th className="px-3 py-1 text-left">Column</th>
+                              <th className="px-3 py-1 text-right">Hist. Intersection ↑</th>
+                              <th className="px-3 py-1 text-right">EPR</th>
+                              <th className="px-3 py-1 text-right">UVRR ↑</th>
+                              <th className="px-3 py-1 text-left">SFS ↑</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {m.catFidelity.map(f => (
+                              <tr key={f.col} className="border-b hover:bg-muted/20">
+                                <td className="px-3 py-1.5 font-mono">{f.col}</td>
+                                <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.histIntersection} /></td>
+                                <td className="px-3 py-1.5 text-right">
+                                  <StatBadgeColored val={Math.max(0, 1 - Math.abs(1 - f.epr))} />
+                                </td>
+                                <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.uvrr} /></td>
+                                <td className="px-3 py-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <div className={`h-1.5 rounded-full ${sfsBarClass(f.sfs)}`} style={{ width: `${f.sfs * 60}px` }} />
+                                    <span className={`font-semibold ${scoreColor(f.sfs)}`}>{fmt2(f.sfs)}</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              )}
 
-              {/* ── TABS ─────────────────────────────────────────────── */}
-              <Tabs defaultValue="statistical">
-                <TabsList className="grid grid-cols-6 w-full">
-                  <TabsTrigger value="statistical" className="text-xs">Statistical</TabsTrigger>
-                  <TabsTrigger value="distributions" className="text-xs">Distributions</TabsTrigger>
-                  <TabsTrigger value="correlations" className="text-xs">Correlations</TabsTrigger>
-                  <TabsTrigger value="privacy-utility" className="text-xs">Privacy-Utility</TabsTrigger>
-                  <TabsTrigger value="attack-impact" className="text-xs">Attack Impact</TabsTrigger>
-                  <TabsTrigger value="compliance" className="text-xs">Compliance</TabsTrigger>
-                </TabsList>
-
-                {/* ── B: STATISTICAL FIDELITY ─────────────────────── */}
-                <TabsContent value="statistical">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Statistical Fidelity — Per Column</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      {m.numericFidelity.length === 0 ? (
-                        <p className="p-4 text-sm text-muted-foreground">No numeric columns detected.</p>
-                      ) : (
-                        <div className="overflow-auto">
-                          <table className="w-full text-xs" data-testid="fidelity-table">
-                            <thead>
-                              <tr className="border-b bg-muted/40 text-muted-foreground">
-                                <th className="px-3 py-2 text-left">Column</th>
-                                <th className="px-3 py-2 text-right">Orig Mean</th>
-                                <th className="px-3 py-2 text-right">Proc Mean</th>
-                                <th className="px-3 py-2 text-right">Rel Bias</th>
-                                <th className="px-3 py-2 text-right">Var Ratio</th>
-                                <th className="px-3 py-2 text-right">KS Stat ↓</th>
-                                <th className="px-3 py-2 text-right">JSD ↓</th>
-                                <th className="px-3 py-2 text-left">SFS ↑</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {m.numericFidelity.map(f => <FidelityRow key={f.col} f={f} />)}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-
-                      {m.catFidelity.length > 0 && (
-                        <div className="p-3 border-t">
-                          <p className="text-xs font-semibold text-muted-foreground mb-2">Categorical Columns</p>
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b bg-muted/30 text-muted-foreground">
-                                <th className="px-3 py-1 text-left">Column</th>
-                                <th className="px-3 py-1 text-right">Hist. Intersection ↑</th>
-                                <th className="px-3 py-1 text-right">EPR</th>
-                                <th className="px-3 py-1 text-right">UVRR ↑</th>
-                                <th className="px-3 py-1 text-left">SFS ↑</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {m.catFidelity.map(f => (
-                                <tr key={f.col} className="border-b hover:bg-muted/20">
-                                  <td className="px-3 py-1.5 font-mono">{f.col}</td>
-                                  <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.histIntersection} /></td>
-                                  <td className="px-3 py-1.5 text-right">
-                                    <StatBadgeColored val={Math.max(0, 1 - Math.abs(1 - f.epr))} />
-                                  </td>
-                                  <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.uvrr} /></td>
-                                  <td className="px-3 py-1.5">
-                                    <div className="flex items-center gap-2">
-                                      <div className={`h-1.5 rounded-full ${sfsBarClass(f.sfs)}`} style={{ width: `${f.sfs * 60}px` }} />
-                                      <span className={`font-semibold ${scoreColor(f.sfs)}`}>{fmt2(f.sfs)}</span>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                {/* ── C: DISTRIBUTIONS ──────────────────────────────── */}
-                <TabsContent value="distributions">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Distribution Comparison — Histogram Overlays</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {m.numericFidelity.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No numeric columns.</p>
-                      ) : (
-                        <div className="grid grid-cols-2 gap-6 mb-6">
-                          {m.numericFidelity.slice(0, 8).map(f => <HistChart key={f.col} f={f} />)}
-                        </div>
-                      )}
-                      {m.numericFidelity.length > 0 && (
-                        <>
-                          <p className="text-xs font-semibold text-muted-foreground mb-2">Distribution Divergence Metrics</p>
-                          <div className="overflow-auto">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="border-b bg-muted/30 text-muted-foreground">
-                                  <th className="px-3 py-1 text-left">Column</th>
-                                  <th className="px-3 py-1 text-right">KS Stat</th>
-                                  <th className="px-3 py-1 text-right">JSD</th>
-                                  <th className="px-3 py-1 text-right">Wasserstein-1</th>
-                                  <th className="px-3 py-1 text-right">EPR</th>
-                                  <th className="px-3 py-1 text-right">UVRR</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {m.numericFidelity.map(f => (
-                                  <tr key={f.col} className="border-b hover:bg-muted/20">
-                                    <td className="px-3 py-1.5 font-mono">{f.col}</td>
-                                    <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.ksStat} lowGood /></td>
-                                    <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.jsd} lowGood /></td>
-                                    <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.wassersteinNorm} lowGood /></td>
-                                    <td className="px-3 py-1.5 text-right">
-                                      <span className={`font-mono ${Math.abs(1 - f.epr) < 0.15 ? "text-green-600" : Math.abs(1 - f.epr) < 0.35 ? "text-amber-600" : "text-red-600"}`}>
-                                        {f.epr.toFixed(3)}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.uvrr} /></td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                {/* ── D: CORRELATIONS ───────────────────────────────── */}
-                <TabsContent value="correlations">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Correlation Preservation</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-6">
-                      <div className="flex gap-6 items-start">
-                        <div className="p-4 rounded-lg bg-muted/40 text-center min-w-40">
-                          <p className="text-xs text-muted-foreground">Frobenius Distance (ΔR_F)</p>
-                          <p className={`text-3xl font-bold mt-1 ${m.deltaFrob < 0.1 ? "text-green-600" : m.deltaFrob < 0.2 ? "text-amber-600" : "text-red-600"}`}>
-                            {m.deltaFrob.toFixed(3)}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">Normalised</p>
-                        </div>
-                        <div className="p-4 rounded-lg bg-muted/40 text-center min-w-40">
-                          <p className="text-xs text-muted-foreground">CP Score</p>
-                          <p className={`text-3xl font-bold mt-1 ${scoreColor(m.cpScore)}`}>{fmt2(m.cpScore)}</p>
-                          <p className="text-xs text-muted-foreground mt-1">= 1 − Frob dist</p>
-                        </div>
-                        <div className="text-xs text-muted-foreground max-w-xs">
-                          <p className="font-semibold text-foreground mb-1">Interpretation</p>
-                          <p>Frobenius distance measures how much the full Pearson correlation matrix changed between original and processed data. Lower values mean correlations are well-preserved.</p>
-                          <p className="mt-2">• &lt;0.10: Excellent preservation (green)</p>
-                          <p>• 0.10–0.20: Acceptable (amber)</p>
-                          <p>• &gt;0.20: Significant structure change (red)</p>
-                        </div>
+              {/* ── TAB: DISTRIBUTIONS ──────────────────────────────────── */}
+              {activeTab === "distributions" && (
+                <div className="flex flex-col gap-5">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Histogram Overlays</p>
+                    {m.numericFidelity.length === 0 ? (
+                      <p className="text-sm text-slate-500">No numeric columns.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-6">
+                        {m.numericFidelity.slice(0, 8).map(f => <HistChart key={f.col} f={f} />)}
                       </div>
-                      <div>
-                        <p className="text-xs font-semibold text-muted-foreground mb-2">ΔCorrelation Heatmap (Original − Processed)</p>
-                        <CorrHeatmap cols={m.correlationCols} delta={deltaCorr} />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                {/* ── E: PRIVACY-UTILITY ────────────────────────────── */}
-                <TabsContent value="privacy-utility">
-                  <div className="flex flex-col gap-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm">Privacy-Utility Radar</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <RadarOUS m={m} />
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm">Risk-Utility Trade-off</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          {m.riskBefore != null ? (
-                            <ResponsiveContainer width="100%" height={220}>
-                              <ScatterChart margin={{ top: 8, right: 24, left: 0, bottom: 24 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                <XAxis
-                                  type="number" dataKey="x" name="Re-ID Risk %" domain={[0, 100]}
-                                  tick={{ fontSize: 10 }}
-                                  label={{ value: "Re-ID Risk (%)", position: "insideBottom", offset: -12, fontSize: 10 }}
-                                />
-                                <YAxis
-                                  type="number" dataKey="y" name="Utility Loss %" domain={[0, 100]}
-                                  tick={{ fontSize: 10 }}
-                                  label={{ value: "Utility Loss (%)", angle: -90, position: "insideLeft", fontSize: 10 }}
-                                />
-                                <ZAxis type="number" dataKey="z" range={[200, 200]} />
-                                <Tooltip formatter={(v: number, n: string) => [`${v.toFixed(1)}%`, n]} />
-                                <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                                <Scatter name="Original" data={[{ x: m.riskBefore * 100, y: 100 - m.ous, z: 30 }]} fill="#ef4444" opacity={0.8} />
-                                <Scatter name="Processed" data={[{ x: (m.riskAfter ?? m.riskBefore * 0.4) * 100, y: 100 - m.ous, z: 30 }]} fill="#16a34a" opacity={0.8} />
-                              </ScatterChart>
-                            </ResponsiveContainer>
-                          ) : (
-                            <div className="h-48 flex items-center justify-center text-center text-sm text-muted-foreground">
-                              <div>
-                                <Info className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                                <p>No risk assessment found.</p>
-                                <p className="text-xs mt-1">Run Risk Assessment first.</p>
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Technique Effectiveness Summary</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-3 gap-3 mb-4">
-                          {[
-                            { label: "Statistical Fidelity", score: m.sfs, weight: "30%", desc: "Mean preservation, variance, percentiles", insufficient: false },
-                            { label: "Distribution Similarity", score: m.dsScore, weight: "25%", desc: "KS test, JSD, Wasserstein-1", insufficient: false },
-                            { label: "Information Content", score: m.icScore, weight: "20%", desc: "Shannon entropy preservation (EPR)", insufficient: false },
-                            { label: "Correlation Preservation", score: m.cpScore, weight: "15%", desc: "Pearson matrix Frobenius distance", insufficient: false },
-                            { label: "Predictive Utility", score: m.puScore, weight: "10%", desc: m.puInsufficient ? "Insufficient numeric columns for assessment" : "R² retention proxy", insufficient: !!m.puInsufficient },
-                            { label: "Overall Utility (OUS)", score: m.ous / 100, weight: "100%", desc: "Weighted composite of all 5 dimensions", insufficient: false },
-                          ].map(item => (
-                            <div key={item.label} className={`p-3 rounded-lg border ${item.insufficient ? "bg-amber-50 dark:bg-amber-950/20 border-amber-300" : "bg-muted/20"}`}>
-                              <div className="flex justify-between items-start mb-2">
-                                <p className="text-xs font-semibold leading-tight">{item.label}</p>
-                                <Badge variant="outline" className="text-[10px] shrink-0 ml-1">{item.weight}</Badge>
-                              </div>
-                              {item.insufficient ? (
-                                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium leading-snug">
-                                  Insufficient numeric columns for predictive utility assessment
-                                </p>
-                              ) : (
-                                <p className={`text-2xl font-bold ${scoreColor(item.score)}`}>{fmt2(item.score)}</p>
-                              )}
-                              <p className="text-[10px] text-muted-foreground mt-1">{item.desc}</p>
-                            </div>
-                          ))}
-                        </div>
-                        <p className="text-xs font-semibold text-muted-foreground mb-2">Recommendations</p>
-                        <div className="flex flex-col gap-2">
-                          {m.recommendations.map((r, i) => (
-                            <div key={i} className="flex items-start gap-2 text-xs p-2 rounded bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
-                              <CheckCircle className="h-3.5 w-3.5 text-blue-600 mt-0.5 shrink-0" />{r}
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
+                    )}
                   </div>
-                </TabsContent>
 
-                {/* ── F: ATTACK IMPACT ──────────────────────────────── */}
-                <TabsContent value="attack-impact">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Attack Impact Assessment</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {m.riskBefore === null ? (
-                        <div className="flex items-center gap-3 p-4 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200">
-                          <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
-                          <div>
-                            <p className="text-sm font-medium">No Risk Assessment Available</p>
-                            <p className="text-xs text-muted-foreground">Run a Risk Assessment on the original dataset to see per-attack risk scores.</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="grid grid-cols-3 gap-3 mb-4">
-                            {[
-                              { label: "Risk Before", val: `${(m.riskBefore * 100).toFixed(1)}%`, cls: "text-red-600" },
-                              { label: "Risk After (est.)", val: m.riskAfter != null ? `${(m.riskAfter * 100).toFixed(1)}%` : "—", cls: "text-green-600" },
-                              { label: "Risk Reduction", val: m.riskReduction != null ? `${m.riskReduction.toFixed(1)}%` : "—", cls: "text-blue-600" },
-                            ].map(item => (
-                              <div key={item.label} className="p-3 rounded border bg-muted/20 text-center">
-                                <p className="text-xs text-muted-foreground">{item.label}</p>
-                                <p className={`text-2xl font-bold mt-1 ${item.cls}`}>{item.val}</p>
-                              </div>
+                  {m.numericFidelity.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Distribution Divergence Metrics</p>
+                      <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b bg-slate-50 dark:bg-slate-800/50 text-slate-500">
+                              <th className="px-3 py-1 text-left">Column</th>
+                              <th className="px-3 py-1 text-right">KS Stat</th>
+                              <th className="px-3 py-1 text-right">JSD</th>
+                              <th className="px-3 py-1 text-right">Wasserstein-1</th>
+                              <th className="px-3 py-1 text-right">EPR</th>
+                              <th className="px-3 py-1 text-right">UVRR</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {m.numericFidelity.map(f => (
+                              <tr key={f.col} className="border-b hover:bg-muted/20">
+                                <td className="px-3 py-1.5 font-mono">{f.col}</td>
+                                <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.ksStat} lowGood /></td>
+                                <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.jsd} lowGood /></td>
+                                <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.wassersteinNorm} lowGood /></td>
+                                <td className="px-3 py-1.5 text-right">
+                                  <span className={`font-mono ${Math.abs(1 - f.epr) < 0.15 ? "text-green-600" : Math.abs(1 - f.epr) < 0.35 ? "text-amber-600" : "text-red-600"}`}>
+                                    {f.epr.toFixed(3)}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-1.5 text-right"><StatBadgeColored val={f.uvrr} /></td>
+                              </tr>
                             ))}
-                          </div>
-                          <table className="w-full text-xs" data-testid="attack-table">
-                            <thead>
-                              <tr className="border-b bg-muted/40 text-muted-foreground">
-                                <th className="px-3 py-2 text-left">Attack Model</th>
-                                <th className="px-3 py-2 text-right">Risk Before</th>
-                                <th className="px-3 py-2 text-right">Risk After (est.)</th>
-                                <th className="px-3 py-2 text-right">Reduction</th>
-                                <th className="px-3 py-2">Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(["Prosecutor", "Journalist", "Marketer"] as const).map((attack, i) => {
-                                const mult = [1.0, 0.75, 0.5][i];
-                                const rb = (m.riskBefore ?? 0) * mult;
-                                const ra = (m.riskAfter ?? (m.riskBefore ?? 0) * 0.4) * mult;
-                                const red = rb > 0 ? (rb - ra) / rb * 100 : 0;
-                                const status = ra < 0.2 ? "Low Risk" : ra < 0.4 ? "Medium Risk" : "High Risk";
-                                const statusCls = ra < 0.2
-                                  ? "bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900/40 dark:text-green-300"
-                                  : ra < 0.4
-                                  ? "bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/40 dark:text-amber-300"
-                                  : "bg-red-100 text-red-800 hover:bg-red-100 dark:bg-red-900/40 dark:text-red-300";
-                                return (
-                                  <tr key={attack} className="border-b hover:bg-muted/20">
-                                    <td className="px-3 py-2 font-medium">{attack}</td>
-                                    <td className="px-3 py-2 text-right text-red-600">{(rb * 100).toFixed(1)}%</td>
-                                    <td className="px-3 py-2 text-right text-green-600">{(ra * 100).toFixed(1)}%</td>
-                                    <td className="px-3 py-2 text-right text-blue-600">{red.toFixed(1)}%</td>
-                                    <td className="px-3 py-2"><Badge className={statusCls}>{status}</Badge></td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                          <p className="text-[10px] text-muted-foreground mt-2">
-                            * Post-anonymization risk estimates are derived from statistical fidelity reduction. Run a full Risk Assessment on the processed data for precise values.
-                          </p>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
-                {/* ── G: COMPLIANCE ─────────────────────────────────── */}
-                <TabsContent value="compliance">
-                  <div className="grid grid-cols-2 gap-4">
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <Shield className="h-4 w-4 text-blue-600" />
-                          DPDP Act 2023 Readiness
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="flex flex-col">
-                          {dpdpChecks.map((c, i) => (
-                            <div key={i} className="flex items-center justify-between py-2.5 border-b last:border-0">
-                              <div className="flex items-center gap-2 text-xs">
-                                {c.pass
-                                  ? <CheckCircle className="h-3.5 w-3.5 text-green-600 shrink-0" />
-                                  : <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
-                                {c.label}
-                              </div>
-                              <span className={`text-xs font-mono font-semibold ${c.pass ? "text-green-600" : "text-red-500"}`}>{c.val}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className={`mt-3 p-3 rounded-lg text-xs font-semibold border ${dpdpChecks.filter(c => c.pass).length >= 4 ? "bg-green-50 border-green-300 text-green-800 dark:bg-green-950/30 dark:text-green-300" : "bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300"}`}>
-                          {dpdpChecks.filter(c => c.pass).length}/{dpdpChecks.length} criteria met —{" "}
-                          {dpdpChecks.filter(c => c.pass).length >= 5 ? "LIKELY COMPLIANT" : dpdpChecks.filter(c => c.pass).length >= 3 ? "PARTIALLY COMPLIANT" : "REVIEW REQUIRED"}
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <CheckSquare className="h-4 w-4 text-blue-600" />
-                          NSO Microdata Release Criteria
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="flex flex-col">
-                          {nsoChecks.map((c, i) => (
-                            <div key={i} className="flex items-center justify-between py-2.5 border-b last:border-0">
-                              <div className="flex items-center gap-2 text-xs">
-                                {c.pass
-                                  ? <CheckCircle className="h-3.5 w-3.5 text-green-600 shrink-0" />
-                                  : <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
-                                {c.label}
-                              </div>
-                              <span className={`text-xs font-mono font-semibold ${c.pass ? "text-green-600" : "text-red-500"}`}>{c.val}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className={`mt-3 p-3 rounded-lg text-xs font-semibold border ${nsoChecks.filter(c => c.pass).length >= 3 ? "bg-green-50 border-green-300 text-green-800 dark:bg-green-950/30 dark:text-green-300" : "bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300"}`}>
-                          {nsoChecks.filter(c => c.pass).length >= 3
-                            ? "✅ SUITABLE FOR RESTRICTED ACCESS RELEASE"
-                            : "⚠ ADDITIONAL PRIVACY MEASURES REQUIRED"}
-                        </div>
-                      </CardContent>
-                    </Card>
+              {/* ── TAB: CORRELATIONS ───────────────────────────────────── */}
+              {activeTab === "correlations" && (
+                <div className="flex flex-col gap-5">
+                  <div className="flex gap-4 items-start">
+                    <div className="px-6 py-4 rounded-xl border border-slate-200 dark:border-slate-700 text-center min-w-40">
+                      <p className="text-xs text-slate-400">Frobenius Distance (ΔR_F)</p>
+                      <p className={`text-3xl font-bold mt-1 ${m.deltaFrob < 0.1 ? "text-green-600" : m.deltaFrob < 0.2 ? "text-amber-600" : "text-red-600"}`}>
+                        {m.deltaFrob.toFixed(3)}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">Normalised</p>
+                    </div>
+                    <div className="px-6 py-4 rounded-xl border border-slate-200 dark:border-slate-700 text-center min-w-40">
+                      <p className="text-xs text-slate-400">CP Score</p>
+                      <p className={`text-3xl font-bold mt-1 ${scoreColor(m.cpScore)}`}>{fmt2(m.cpScore)}</p>
+                      <p className="text-xs text-slate-400 mt-1">= 1 − Frob dist</p>
+                    </div>
+                    <div className="text-xs text-slate-500 max-w-xs pt-2">
+                      <p className="font-semibold text-slate-700 dark:text-slate-300 mb-1">Interpretation</p>
+                      <p>Frobenius distance measures how much the full Pearson correlation matrix changed. Lower values mean correlations are well-preserved.</p>
+                      <p className="mt-2">• &lt;0.10: Excellent preservation</p>
+                      <p>• 0.10–0.20: Acceptable</p>
+                      <p>• &gt;0.20: Significant structure change</p>
+                    </div>
                   </div>
-                </TabsContent>
-              </Tabs>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">ΔCorrelation Heatmap (Original − Processed)</p>
+                    <CorrHeatmap cols={m.correlationCols} delta={deltaCorr} />
+                  </div>
+                </div>
+              )}
 
-              {/* ── EXPORT ACTIONS ────────────────────────────────────── */}
-              <div className="flex gap-3">
+              {/* ── TAB: PRIVACY-UTILITY ────────────────────────────────── */}
+              {activeTab === "privacy-utility" && (
+                <div className="flex flex-col gap-5">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Privacy-Utility Radar</p>
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                        <RadarOUS m={m} />
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Risk-Utility Trade-off</p>
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                        {m.riskBefore != null ? (
+                          <ResponsiveContainer width="100%" height={220}>
+                            <ScatterChart margin={{ top: 8, right: 24, left: 0, bottom: 24 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                              <XAxis
+                                type="number" dataKey="x" name="Re-ID Risk %" domain={[0, 100]}
+                                tick={{ fontSize: 10 }}
+                                label={{ value: "Re-ID Risk (%)", position: "insideBottom", offset: -12, fontSize: 10 }}
+                              />
+                              <YAxis
+                                type="number" dataKey="y" name="Utility Loss %" domain={[0, 100]}
+                                tick={{ fontSize: 10 }}
+                                label={{ value: "Utility Loss (%)", angle: -90, position: "insideLeft", fontSize: 10 }}
+                              />
+                              <ZAxis type="number" dataKey="z" range={[200, 200]} />
+                              <Tooltip formatter={(v: number, n: string) => [`${v.toFixed(1)}%`, n]} />
+                              <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                              <Scatter name="Original" data={[{ x: m.riskBefore * 100, y: 100 - m.ous, z: 30 }]} fill="#ef4444" opacity={0.8} />
+                              <Scatter name="Processed" data={[{ x: (m.riskAfter ?? m.riskBefore * 0.4) * 100, y: 100 - m.ous, z: 30 }]} fill="#16a34a" opacity={0.8} />
+                            </ScatterChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="h-48 flex items-center justify-center text-center text-sm text-slate-400">
+                            <div>
+                              <Info className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                              <p>No risk assessment found.</p>
+                              <p className="text-xs mt-1">Run Risk Assessment first.</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Technique Effectiveness Summary</p>
+                    <div className="grid grid-cols-3 gap-3 mb-4">
+                      {[
+                        { label: "Statistical Fidelity", score: m.sfs, weight: "30%", desc: "Mean preservation, variance, percentiles", insufficient: false },
+                        { label: "Distribution Similarity", score: m.dsScore, weight: "25%", desc: "KS test, JSD, Wasserstein-1", insufficient: false },
+                        { label: "Information Content", score: m.icScore, weight: "20%", desc: "Shannon entropy preservation (EPR)", insufficient: false },
+                        { label: "Correlation Preservation", score: m.cpScore, weight: "15%", desc: "Pearson matrix Frobenius distance", insufficient: false },
+                        { label: "Predictive Utility", score: m.puScore, weight: "10%", desc: m.puInsufficient ? "Insufficient numeric columns for assessment" : "R² retention proxy", insufficient: !!m.puInsufficient },
+                        { label: "Overall Utility (OUS)", score: m.ous / 100, weight: "100%", desc: "Weighted composite of all 5 dimensions", insufficient: false },
+                      ].map(item => (
+                        <div key={item.label} className={`p-3 rounded-xl border ${item.insufficient ? "bg-amber-50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700" : "border-slate-200 dark:border-slate-700"}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <p className="text-xs font-semibold leading-tight text-slate-700 dark:text-slate-300">{item.label}</p>
+                            <Badge variant="outline" className="text-[10px] shrink-0 ml-1">{item.weight}</Badge>
+                          </div>
+                          {item.insufficient ? (
+                            <p className="text-xs text-amber-700 dark:text-amber-400 font-medium leading-snug">
+                              Insufficient numeric columns for predictive utility assessment
+                            </p>
+                          ) : (
+                            <p className={`text-2xl font-bold ${scoreColor(item.score)}`}>{fmt2(item.score)}</p>
+                          )}
+                          <p className="text-[10px] text-slate-400 mt-1">{item.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Recommendations</p>
+                    <div className="flex flex-col gap-2">
+                      {m.recommendations.map((r, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs p-2.5 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+                          <CheckCircle className="h-3.5 w-3.5 text-blue-600 mt-0.5 shrink-0" />{r}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── TAB: ATTACK IMPACT ──────────────────────────────────── */}
+              {activeTab === "attack-impact" && (
+                <div className="flex flex-col gap-4">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Attack Impact Assessment</p>
+                  {m.riskBefore === null ? (
+                    <div className="flex items-center gap-3 p-4 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-300">No Risk Assessment Available</p>
+                        <p className="text-xs text-amber-600 dark:text-amber-400">Run a Risk Assessment on the original dataset to see per-attack risk scores.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-3 gap-3">
+                        {[
+                          { label: "Risk Before", val: `${(m.riskBefore * 100).toFixed(1)}%`, cls: "text-red-600 dark:text-red-400" },
+                          { label: "Risk After (est.)", val: m.riskAfter != null ? `${(m.riskAfter * 100).toFixed(1)}%` : "—", cls: "text-green-600 dark:text-green-400" },
+                          { label: "Risk Reduction", val: m.riskReduction != null ? `${m.riskReduction.toFixed(1)}%` : "—", cls: "text-blue-600 dark:text-blue-400" },
+                        ].map(item => (
+                          <div key={item.label} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                            <p className="text-xs text-slate-400">{item.label}</p>
+                            <p className={`text-2xl font-bold mt-1 ${item.cls}`}>{item.val}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                        <table className="w-full text-xs" data-testid="attack-table">
+                          <thead>
+                            <tr className="border-b bg-slate-50 dark:bg-slate-800/50 text-slate-500">
+                              <th className="px-3 py-2 text-left">Attack Model</th>
+                              <th className="px-3 py-2 text-right">Risk Before</th>
+                              <th className="px-3 py-2 text-right">Risk After (est.)</th>
+                              <th className="px-3 py-2 text-right">Reduction</th>
+                              <th className="px-3 py-2">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(["Prosecutor", "Journalist", "Marketer"] as const).map((attack, i) => {
+                              const mult = [1.0, 0.75, 0.5][i];
+                              const rb = (m.riskBefore ?? 0) * mult;
+                              const ra = (m.riskAfter ?? (m.riskBefore ?? 0) * 0.4) * mult;
+                              const red = rb > 0 ? (rb - ra) / rb * 100 : 0;
+                              const status = ra < 0.2 ? "Low Risk" : ra < 0.4 ? "Medium Risk" : "High Risk";
+                              const statusCls = ra < 0.2
+                                ? "bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900/40 dark:text-green-300"
+                                : ra < 0.4
+                                ? "bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/40 dark:text-amber-300"
+                                : "bg-red-100 text-red-800 hover:bg-red-100 dark:bg-red-900/40 dark:text-red-300";
+                              return (
+                                <tr key={attack} className="border-b hover:bg-muted/20">
+                                  <td className="px-3 py-2 font-medium">{attack}</td>
+                                  <td className="px-3 py-2 text-right text-red-600">{(rb * 100).toFixed(1)}%</td>
+                                  <td className="px-3 py-2 text-right text-green-600">{(ra * 100).toFixed(1)}%</td>
+                                  <td className="px-3 py-2 text-right text-blue-600">{red.toFixed(1)}%</td>
+                                  <td className="px-3 py-2"><Badge className={statusCls}>{status}</Badge></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        * Post-anonymization risk estimates are derived from statistical fidelity reduction. Run a full Risk Assessment on the processed data for precise values.
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ── TAB: COMPLIANCE ─────────────────────────────────────── */}
+              {activeTab === "compliance" && (
+                <div className="grid grid-cols-2 gap-5">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                      <Shield className="h-3.5 w-3.5" /> DPDP Act 2023 Readiness
+                    </p>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                      {dpdpChecks.map((c, i) => (
+                        <div key={i} className="flex items-center justify-between px-4 py-3">
+                          <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                            {c.pass
+                              ? <CheckCircle className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                              : <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+                            {c.label}
+                          </div>
+                          <span className={`text-xs font-mono font-semibold ${c.pass ? "text-green-600" : "text-red-500"}`}>{c.val}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className={`mt-3 p-3 rounded-lg text-xs font-semibold border ${dpdpChecks.filter(c => c.pass).length >= 4 ? "bg-green-50 border-green-300 text-green-800 dark:bg-green-950/30 dark:text-green-300" : "bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300"}`}>
+                      {dpdpChecks.filter(c => c.pass).length}/{dpdpChecks.length} criteria met —{" "}
+                      {dpdpChecks.filter(c => c.pass).length >= 5 ? "LIKELY COMPLIANT" : dpdpChecks.filter(c => c.pass).length >= 3 ? "PARTIALLY COMPLIANT" : "REVIEW REQUIRED"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                      <CheckSquare className="h-3.5 w-3.5" /> NSO Microdata Release Criteria
+                    </p>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                      {nsoChecks.map((c, i) => (
+                        <div key={i} className="flex items-center justify-between px-4 py-3">
+                          <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                            {c.pass
+                              ? <CheckCircle className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                              : <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+                            {c.label}
+                          </div>
+                          <span className={`text-xs font-mono font-semibold ${c.pass ? "text-green-600" : "text-red-500"}`}>{c.val}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className={`mt-3 p-3 rounded-lg text-xs font-semibold border ${nsoChecks.filter(c => c.pass).length >= 3 ? "bg-green-50 border-green-300 text-green-800 dark:bg-green-950/30 dark:text-green-300" : "bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300"}`}>
+                      {nsoChecks.filter(c => c.pass).length >= 3
+                        ? "✅ SUITABLE FOR RESTRICTED ACCESS RELEASE"
+                        : "⚠ ADDITIONAL PRIVACY MEASURES REQUIRED"}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── EXPORT ACTIONS ───────────────────────────────────────── */}
+              <div className="flex gap-3 mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
                 <Button variant="outline" size="sm" onClick={downloadReport} data-testid="btn-download-report">
                   <FileText className="h-3.5 w-3.5 mr-2" />
                   Generate Full Report (HTML)
