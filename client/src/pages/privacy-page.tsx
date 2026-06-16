@@ -1134,7 +1134,7 @@ export default function PrivacyPage() {
 
       if (selectedDataset) {
         apiRequest("POST", "/api/privacy/save-result", {
-          datasetId: parseInt(selectedDataset),
+          datasetId: selectedDataset,
           technique: res!.technique,
           method: family,
           parameters: { family, technique: activeTech, quasiIdentifiers, sensitiveAttr, k: kVal[0], suppressionLimit: suppLimit[0], l: lVal[0], lMethod, t: tVal[0], epsilon: epsilon[0], delta: delta[0] },

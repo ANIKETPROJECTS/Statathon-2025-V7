@@ -62,9 +62,9 @@ interface UtilityMetrics {
 }
 
 interface UMeasurement {
-  id: number;
-  originalDatasetId: number;
-  processedOperationId: number;
+  id: string;
+  originalDatasetId: string;
+  processedOperationId: string;
   overallUtility: number;
   utilityLevel: string;
   correlationPreservation: number;
@@ -520,8 +520,8 @@ export default function UtilityPage() {
   const measureMut = useMutation({
     mutationFn: () =>
       apiRequest("POST", "/api/utility/measure", {
-        originalDatasetId: Number(selectedDataset),
-        processedOperationId: Number(selectedOperation),
+        originalDatasetId: selectedDataset,
+        processedOperationId: selectedOperation,
       }).then((r) => r.json()),
     onSuccess: (data: UMeasurement) => {
       qc.invalidateQueries({ queryKey: ["/api/utility/measurements"] });
@@ -573,7 +573,7 @@ export default function UtilityPage() {
   const suppPct = m && m.rowsOrig > 0 ? (m.rowsOrig - m.rowsProc) / m.rowsOrig * 100 : 0;
 
   const filteredOps = selectedDataset
-    ? operations.filter((o: any) => o.datasetId === Number(selectedDataset))
+    ? operations.filter((o: any) => String(o.datasetId) === String(selectedDataset))
     : operations;
 
   const dpdpChecks = m ? [

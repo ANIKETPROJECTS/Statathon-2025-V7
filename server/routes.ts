@@ -606,6 +606,18 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/privacy/:id", requireAuth, async (req, res) => {
+    try {
+      const op = await storage.getPrivacyOperation(req.params.id);
+      if (!op) return res.status(404).send("Operation not found");
+      if (op.userId !== (req.user as any).id) return res.status(403).send("Forbidden");
+      await storage.deletePrivacyOperation(req.params.id);
+      res.sendStatus(200);
+    } catch (error) {
+      res.status(500).send("Failed to delete operation");
+    }
+  });
+
   // Save a client-side privacy result to the database
   app.post("/api/privacy/save-result", requireAuth, async (req, res) => {
     try {

@@ -22,6 +22,7 @@ import HelpPage from "@/pages/help-page";
 import PrivacyResultsPage from "@/pages/privacy-results-page";
 import AdminPage from "@/pages/admin-page";
 import ResearcherDashboard from "@/pages/researcher-dashboard";
+import DatasetHandlingPage from "@/pages/dataset-handling-page";
 
 function HomeRedirect() {
   const { user, isLoading } = useAuth();
@@ -44,6 +45,7 @@ function Router() {
       <ProtectedRoute path="/config"           component={ConfigPage}          />
       <ProtectedRoute path="/profile"          component={ProfilePage}         />
       <ProtectedRoute path="/help"             component={HelpPage}            />
+      <ProtectedRoute path="/datasets"          component={DatasetHandlingPage} />
       <ProtectedRoute path="/admin"            component={AdminPage}           roles={["master"]} />
       <ProtectedRoute path="/researcher"       component={ResearcherDashboard} />
       <Route path="/auth" component={AuthPage} />

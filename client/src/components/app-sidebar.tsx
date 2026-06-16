@@ -28,12 +28,13 @@ import userIcon       from "@assets/user-icon.png";
 import helpIcon       from "@assets/help.png";
 
 const mainMenuItems = [
-  { title: "Dashboard",           url: "/",        icon: dashboardIcon  },
-  { title: "Data Upload",         url: "/upload",  icon: folderIcon     },
-  { title: "Risk Assessment",     url: "/risk",    icon: cautionIcon    },
-  { title: "Privacy Enhancement", url: "/privacy", icon: securityIcon   },
-  { title: "Utility Measurement", url: "/utility", icon: graphIcon      },
-  { title: "Reports",             url: "/reports", icon: statisticsIcon },
+  { title: "Dashboard",           url: "/",         icon: dashboardIcon,  perm: null },
+  { title: "Data Upload",         url: "/upload",   icon: folderIcon,     perm: "data_upload" },
+  { title: "Risk Assessment",     url: "/risk",     icon: cautionIcon,    perm: "risk_assessment" },
+  { title: "Privacy Enhancement", url: "/privacy",  icon: securityIcon,   perm: "privacy_enhancement" },
+  { title: "Dataset Handling",    url: "/datasets", icon: statisticsIcon, perm: "privacy_enhancement" },
+  { title: "Utility Measurement", url: "/utility",  icon: graphIcon,      perm: "utility_measurement" },
+  { title: "Reports",             url: "/reports",  icon: statisticsIcon, perm: "report_generation" },
 ];
 
 const settingsMenuItems = [
@@ -115,16 +116,8 @@ export function AppSidebar() {
     ? researcherMenuItems
     : mainMenuItems.filter((item) => {
         if (isMaster) return true;
-        const permMap: Record<string, string> = {
-          "/upload":  "data_upload",
-          "/risk":    "risk_assessment",
-          "/privacy": "privacy_enhancement",
-          "/utility": "utility_measurement",
-          "/reports": "report_generation",
-        };
-        const perm = permMap[item.url];
-        if (!perm) return true; // Dashboard always visible
-        return (user?.permissions || []).includes(perm);
+        if (!item.perm) return true; // Dashboard always visible
+        return (user?.permissions || []).includes(item.perm);
       });
 
   return (

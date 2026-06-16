@@ -48,6 +48,7 @@ export interface IStorage {
   getPrivacyOperations(userId: string): Promise<PrivacyOperation[]>;
   getPrivacyOperation(id: string): Promise<PrivacyOperation | undefined>;
   createPrivacyOperation(operation: InsertPrivacyOperation): Promise<PrivacyOperation>;
+  deletePrivacyOperation(id: string): Promise<void>;
 
   getUtilityMeasurements(userId: string): Promise<UtilityMeasurement[]>;
   getUtilityMeasurement(id: string): Promise<UtilityMeasurement | undefined>;
@@ -189,6 +190,16 @@ export class MongoStorage implements IStorage {
   async createPrivacyOperation(operation: InsertPrivacyOperation): Promise<PrivacyOperation> {
     const d = await PrivacyOperationModel.create(operation);
     return doc<PrivacyOperation>(d);
+  }
+
+  async deletePrivacyOperation(id: string): Promise<void> {
+    try {
+      await PrivacyOperationModel.findByIdAndDelete(id);
+      // Also cascade delete related utility measurements
+      await UtilityMeasurementModel.deleteMany({ processedOperationId: id });
+    } catch {
+      // ignore invalid id
+    }
   }
 
   // ── Utility Measurements ───────────────────────────────────────────────────

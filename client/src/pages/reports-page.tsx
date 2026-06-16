@@ -118,9 +118,9 @@ export default function ReportsPage() {
       title: reportTitle,
       type: reportType,
       format: reportFormat,
-      datasetId: selectedDataset && selectedDataset !== "none" ? parseInt(selectedDataset) : null,
-      riskAssessmentId: selectedAssessment && selectedAssessment !== "none" ? parseInt(selectedAssessment) : null,
-      utilityMeasurementId: selectedUtility && selectedUtility !== "none" ? parseInt(selectedUtility) : null,
+      datasetId: selectedDataset && selectedDataset !== "none" ? selectedDataset : null,
+      riskAssessmentId: selectedAssessment && selectedAssessment !== "none" ? selectedAssessment : null,
+      utilityMeasurementId: selectedUtility && selectedUtility !== "none" ? selectedUtility : null,
     });
   };
 
