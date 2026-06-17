@@ -1,0 +1,63 @@
+root@srv1232657:/var/www/Statathon-2025-V4# cat ecosystem.config.cjs
+module.exports = {
+  apps: [{
+    name: "airavata-app",
+    script: "./dist/index.cjs",
+    env: {
+      NODE_ENV: "production",
+      PORT: 3009,
+      MONGODB_URI: "mongodb+srv://raneaniket23_db_user:F9ydRPZJEZnKBq24@statatho                                                                                                                     n.hgnltng.mongodb.net/?appName=STATATHON",
+      SESSION_SECRET: "f7c1a8e3b5d2c9a4e0f8b1c3d5e2a6f7b3c9d0e1a2b3c4d5e6f7a8b9c                                                                                                                     0d1e2f3"
+    }
+  }]
+};
+root@srv1232657:/var/www/Statathon-2025-V4# pm2 start ecosystem.config.cjs
+[PM2] Applying action restartProcessId on app [airavata-app](ids: [ 21 ])
+[PM2] [airavata-app](21) ✓
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 3  │ DM-pos             │ fork     │ 0    │ online    │ 7.1%     │ 200.4mb  │
+│ 14 │ Tarangdigitalmenu  │ cluster  │ 1    │ online    │ 0%       │ 121.7mb  │
+│ 21 │ airavata-app       │ fork     │ 2    │ online    │ 0%       │ 25.4mb   │
+│ 1  │ airavatatechnolog… │ fork     │ 0    │ online    │ 0%       │ 105.1mb  │
+│ 13 │ at-digital-menu    │ fork     │ 0    │ online    │ 0%       │ 151.0mb  │
+│ 10 │ at-smart-salon     │ fork     │ 6    │ online    │ 0%       │ 152.4mb  │
+│ 11 │ atdigitalmenu      │ cluster  │ 0    │ online    │ 0%       │ 116.9mb  │
+│ 9  │ barrelborn         │ fork     │ 0    │ stopped   │ 0%       │ 0b       │
+│ 5  │ bg-remover-portal  │ fork     │ 0    │ online    │ 0%       │ 125.0mb  │
+│ 8  │ eva-jewels         │ cluster  │ 0    │ online    │ 0%       │ 120.3mb  │
+│ 17 │ krushisuvidha-api  │ fork     │ 0    │ online    │ 0%       │ 175.3mb  │
+│ 15 │ mings-chinese-cui… │ cluster  │ 0    │ online    │ 0%       │ 94.3mb   │
+│ 4  │ portfolio-app      │ fork     │ 0    │ online    │ 0%       │ 79.4mb   │
+│ 19 │ prism-server       │ fork     │ 2    │ online    │ 0%       │ 93.3mb   │
+│ 6  │ rest-express       │ fork     │ 0    │ online    │ 0%       │ 88.7mb   │
+│ 0  │ restaurant-manage… │ fork     │ 0    │ online    │ 0%       │ 79.8mb   │
+│ 2  │ restaurant-pos     │ cluster  │ 0    │ online    │ 0%       │ 129.3mb  │
+│ 20 │ whamo-app          │ fork     │ 0    │ online    │ 7.1%     │ 345.8mb  │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+root@srv1232657:/var/www/Statathon-2025-V4# pm2 log 21
+[TAILING] Tailing last 15 lines for [21] process (change the value with --lines                                                                                                                      option)
+/root/.pm2/logs/airavata-app-error.log last 15 lines:
+21|airavat |     at cjsLoader (node:internal/modules/esm/translators:298:15)
+21|airavat |     at ModuleWrap.<anonymous> (node:internal/modules/esm/translator                                                                                                                     s:240:7)
+21|airavat |     at ModuleJob.run (node:internal/modules/esm/module_job:325:25)
+21|airavat |     at process.processTicksAndRejections (node:internal/process/tas                                                                                                                     k_queues:95:5)
+21|airavat | TypeError: Gw.default.create is not a function
+21|airavat |     at new ld (/var/www/Statathon-2025-V4/dist/index.cjs:191:8819)
+21|airavat |     at Object.<anonymous> (/var/www/Statathon-2025-V4/dist/index.cj                                                                                                                     s:191:12102)
+21|airavat |     at Module._compile (node:internal/modules/cjs/loader:1521:14)
+21|airavat |     at Module._extensions..js (node:internal/modules/cjs/loader:162                                                                                                                     3:10)
+21|airavat |     at Module.load (node:internal/modules/cjs/loader:1266:32)
+21|airavat |     at Module._load (node:internal/modules/cjs/loader:1091:12)
+21|airavat |     at cjsLoader (node:internal/modules/esm/translators:298:15)
+21|airavat |     at ModuleWrap.<anonymous> (node:internal/modules/esm/translator                                                                                                                     s:240:7)
+21|airavat |     at ModuleJob.run (node:internal/modules/esm/module_job:325:25)
+21|airavat |     at process.processTicksAndRejections (node:internal/process/tas                                                                                                                     k_queues:95:5)
+
+/root/.pm2/logs/airavata-app-out.log last 15 lines:
+21|airavat | MongoDB connected
+21|airavat | MongoDB connected
+
+^C
+root@srv1232657:/var/www/Statathon-2025-V4#
