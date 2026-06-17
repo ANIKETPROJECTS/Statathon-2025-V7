@@ -147,16 +147,19 @@ export class MongoStorage implements IStorage {
   }
 
   // ── DataChunks ─────────────────────────────────────────────────────────────
-  private static readonly CHUNK_SIZE = 2000;
+  private static readonly CHUNK_SIZE = 500;   // rows per MongoDB document (~safe below 16 MB)
+  private static readonly INSERT_BATCH = 20;   // chunks per insertMany call
 
   async storeDataChunks(datasetId: string, rows: any[]): Promise<void> {
     const size = MongoStorage.CHUNK_SIZE;
-    const docs = [];
+    const chunks: object[] = [];
     for (let i = 0; i < rows.length; i += size) {
-      docs.push({ datasetId, chunkIndex: Math.floor(i / size), rows: rows.slice(i, i + size) });
+      chunks.push({ datasetId, chunkIndex: Math.floor(i / size), rows: rows.slice(i, i + size) });
     }
-    if (docs.length > 0) {
-      await DataChunkModel.insertMany(docs, { ordered: false });
+    // Insert in batches so no single wire message becomes enormous
+    const batchSize = MongoStorage.INSERT_BATCH;
+    for (let b = 0; b < chunks.length; b += batchSize) {
+      await DataChunkModel.insertMany(chunks.slice(b, b + batchSize), { ordered: true });
     }
   }
 
