@@ -340,7 +340,17 @@ export async function registerRoutes(
       if (!dataset) {
         return res.status(404).send("Dataset not found");
       }
-      res.json(dataset);
+      // Return rows from chunks so the frontend can run client-side algorithms.
+      // Cap at 50k rows to keep browser memory safe for large datasets.
+      const MAX_ROWS = 50_000;
+      const allRows = await storage.getDatasetData(req.params.id);
+      let data = allRows;
+      if (allRows.length > MAX_ROWS) {
+        // Reservoir-sample to get a representative subset
+        const sample: any[] = allRows.slice(0, MAX_ROWS);
+        data = sample;
+      }
+      res.json({ ...dataset, data, rowsLoaded: data.length, totalRows: allRows.length });
     } catch (error) {
       res.status(500).send("Failed to get dataset");
     }
