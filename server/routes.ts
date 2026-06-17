@@ -9,16 +9,8 @@ import { v4 as uuidv4 } from "uuid";
 import { calculateRiskMetrics, getRiskLevel } from "./risk-utils";
 import { applyLDiversityDistinct, applyTCloseness, applyKAnonymityEnhanced } from "./privacy-utils";
 import { computeUtilityMetrics, getGrade } from "./utility-compute";
-import os from "os";
-import fs from "fs";
-
-// Disk storage — no memory limit, handles files of any size
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: os.tmpdir(),
-    filename: (_req, file, cb) => cb(null, uuidv4() + "-" + file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")),
-  }),
-});
+// Memory storage with no size limits
+const upload = multer({ storage: multer.memoryStorage() });
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.isAuthenticated()) {
@@ -228,9 +220,8 @@ export async function registerRoutes(
   });
 
   app.post("/api/data/upload", requireAuth, upload.single("file"), async (req, res) => {
-    const tmpPath = (req.file as any)?.path as string | undefined;
     try {
-      if (!req.file || !tmpPath) {
+      if (!req.file) {
         return res.status(400).send("No file uploaded");
       }
 
@@ -240,19 +231,18 @@ export async function registerRoutes(
       let columns: string[] = [];
 
       if (extension === "csv") {
-        const csvString = fs.readFileSync(tmpPath, "utf-8");
+        const csvString = file.buffer.toString("utf-8");
         const parsed = Papa.parse(csvString, { header: true, skipEmptyLines: true });
         data = parsed.data as any[];
         columns = parsed.meta.fields || [];
       } else if (extension === "xlsx" || extension === "xls") {
-        const buf = fs.readFileSync(tmpPath);
-        const workbook = XLSX.read(buf, { type: "buffer" });
+        const workbook = XLSX.read(file.buffer, { type: "buffer" });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         data = XLSX.utils.sheet_to_json(sheet);
         if (data.length > 0) columns = Object.keys(data[0]);
       } else if (extension === "json") {
-        data = JSON.parse(fs.readFileSync(tmpPath, "utf-8"));
+        data = JSON.parse(file.buffer.toString("utf-8"));
         if (Array.isArray(data) && data.length > 0) columns = Object.keys(data[0]);
       } else {
         return res.status(400).send("Unsupported file format");
@@ -335,9 +325,6 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Upload error:", error);
       res.status(500).send("Failed to process file");
-    } finally {
-      // Always clean up temp file
-      if (tmpPath) try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     }
   });
 
