@@ -16,3 +16,4 @@
 - [Backend Hot-Reload Gap](backend-no-hotreload.md) — dev script is `tsx server/index.ts` (no --watch); backend NEVER auto-reloads; workflow must be explicitly restarted after any server-side change or old code keeps running
 - [MongoDB Migration](mongodb-migration.md) — fully migrated from PostgreSQL/Drizzle to MongoDB/Mongoose; all IDs are now strings (ObjectId); ecosystem.config.cjs has URI placeholder; seedDefaults() in routes.ts creates admin+profiles on first boot
 - [MongoDB ObjectId toJSON Fix](mongodb-objectid-tojson.md) — userId and all ref fields stay as ObjectId objects unless toJSON transform stringifies them; fixed in db.ts global toJSON helper by iterating ret keys
+- [Dataset Chunked Storage](dataset-chunked-storage.md) — rows NOT stored in Dataset document; stored in DataChunk collection (2000 rows/chunk); use storage.getDatasetData(id) to fetch rows; storage.storeDataChunks / replaceDataChunks for writes

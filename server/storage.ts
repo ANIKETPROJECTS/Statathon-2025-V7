@@ -3,6 +3,7 @@ import MongoStore from "connect-mongo";
 import {
   UserModel,
   DatasetModel,
+  DataChunkModel,
   RiskAssessmentModel,
   PrivacyOperationModel,
   UtilityMeasurementModel,
@@ -40,6 +41,9 @@ export interface IStorage {
   createDataset(dataset: InsertDataset): Promise<Dataset>;
   updateDataset(id: string, data: Partial<InsertDataset>): Promise<Dataset | undefined>;
   deleteDataset(id: string): Promise<void>;
+  storeDataChunks(datasetId: string, rows: any[]): Promise<void>;
+  getDatasetData(datasetId: string): Promise<any[]>;
+  replaceDataChunks(datasetId: string, rows: any[]): Promise<void>;
 
   getRiskAssessments(userId: string): Promise<RiskAssessment[]>;
   getRiskAssessment(id: string): Promise<RiskAssessment | undefined>;
@@ -131,16 +135,48 @@ export class MongoStorage implements IStorage {
   }
 
   async createDataset(dataset: InsertDataset): Promise<Dataset> {
-    const d = await DatasetModel.create(dataset);
+    const { data: _rows, ...meta } = dataset as any;
+    const d = await DatasetModel.create(meta);
     return doc<Dataset>(d);
   }
 
   async updateDataset(id: string, data: Partial<InsertDataset>): Promise<Dataset | undefined> {
-    const d = await DatasetModel.findByIdAndUpdate(id, data, { new: true });
+    const { data: _rows, ...meta } = data as any;
+    const d = await DatasetModel.findByIdAndUpdate(id, meta, { new: true });
     return d ? doc<Dataset>(d) : undefined;
   }
 
+  // ── DataChunks ─────────────────────────────────────────────────────────────
+  private static readonly CHUNK_SIZE = 2000;
+
+  async storeDataChunks(datasetId: string, rows: any[]): Promise<void> {
+    const size = MongoStorage.CHUNK_SIZE;
+    const docs = [];
+    for (let i = 0; i < rows.length; i += size) {
+      docs.push({ datasetId, chunkIndex: Math.floor(i / size), rows: rows.slice(i, i + size) });
+    }
+    if (docs.length > 0) {
+      await DataChunkModel.insertMany(docs, { ordered: false });
+    }
+  }
+
+  async getDatasetData(datasetId: string): Promise<any[]> {
+    const chunks = await DataChunkModel.find({ datasetId }).sort({ chunkIndex: 1 }).lean();
+    const result: any[] = [];
+    for (const chunk of chunks) {
+      const rows = chunk.rows as any[];
+      for (const row of rows) result.push(row);
+    }
+    return result;
+  }
+
+  async replaceDataChunks(datasetId: string, rows: any[]): Promise<void> {
+    await DataChunkModel.deleteMany({ datasetId });
+    await this.storeDataChunks(datasetId, rows);
+  }
+
   async deleteDataset(id: string): Promise<void> {
+    await DataChunkModel.deleteMany({ datasetId: id });
     const ops = await PrivacyOperationModel.find({ datasetId: id }).select("_id");
     const opIds = ops.map((o) => o._id);
     if (opIds.length > 0) {

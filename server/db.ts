@@ -82,12 +82,26 @@ const datasetSchema = new Schema(
     avgDiversity: { type: Number, default: null },
     diversityScore: { type: Number, default: null },
     privacyRisk: { type: Number, default: null },
-    data: { type: Schema.Types.Mixed, required: true },
   },
   { timestamps: { createdAt: "uploadedAt", updatedAt: false }, toJSON, toObject: toJSON }
 );
 
 export const DatasetModel = model("Dataset", datasetSchema);
+
+// ── DataChunk ──────────────────────────────────────────────────────────────────
+// Stores dataset rows in fixed-size chunks to bypass MongoDB's 16 MB document limit.
+const dataChunkSchema = new Schema(
+  {
+    datasetId: { type: Schema.Types.ObjectId, ref: "Dataset", required: true, index: true },
+    chunkIndex: { type: Number, required: true },
+    rows: { type: Schema.Types.Mixed, required: true },
+  },
+  { toJSON, toObject: toJSON }
+);
+
+dataChunkSchema.index({ datasetId: 1, chunkIndex: 1 });
+
+export const DataChunkModel = model("DataChunk", dataChunkSchema);
 
 // ── RiskAssessment ────────────────────────────────────────────────────────────
 const riskAssessmentSchema = new Schema(

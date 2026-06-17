@@ -53,7 +53,7 @@ export interface Dataset {
   avgDiversity?: number | null;
   diversityScore?: number | null;
   privacyRisk?: number | null;
-  data: any[];
+  data?: any[];
   uploadedAt?: Date;
 }
 
@@ -71,7 +71,7 @@ export const insertDatasetSchema = z.object({
   completenessScore: z.number().optional().nullable(),
   consistencyScore: z.number().optional().nullable(),
   validityScore: z.number().optional().nullable(),
-  data: z.array(z.any()),
+  data: z.array(z.any()).optional(),
 });
 
 // ── RiskAssessment ────────────────────────────────────────────────────────────

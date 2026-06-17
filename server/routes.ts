@@ -248,39 +248,43 @@ export async function registerRoutes(
         return res.status(400).send("Unsupported file format");
       }
 
-      // Single-pass quality scoring (efficient for large datasets)
-      const SAMPLE_LIMIT = 200_000; // sample cap for quality computation on huge files
-      const sampleData = data.length > SAMPLE_LIMIT ? data.slice(0, SAMPLE_LIMIT) : data;
-      const stringColumns = columns.filter(col => sampleData.length > 0 && typeof sampleData[0][col] === "string");
+      // Quality scoring — cap samples to avoid memory pressure on huge files
+      const COMPLETENESS_LIMIT = 100_000; // rows sampled for completeness/consistency
+      const DEDUP_LIMIT = 50_000;         // rows sampled for duplicate detection (Set is memory-heavy)
+      const qualitySample = data.length > COMPLETENESS_LIMIT ? data.slice(0, COMPLETENESS_LIMIT) : data;
+      const dedupSample = qualitySample.length > DEDUP_LIMIT ? qualitySample.slice(0, DEDUP_LIMIT) : qualitySample;
+      const stringColumns = columns.filter(col => qualitySample.length > 0 && typeof qualitySample[0][col] === "string");
 
       let totalCells = 0, filledCells = 0, duplicateRows = 0, inconsistentRecords = 0;
+
+      // Dedup detection on limited sample only
       const rowSignatures = new Set<string>();
-      // col -> normalized -> first-seen canonical
-      const canonicalMaps = new Map<string, Map<string, string>>();
-      // first pass: build canonical maps
-      const normMaps = new Map<string, Map<string, string>>(); // col -> actual -> canonical
+      for (const row of dedupSample) {
+        const sig = JSON.stringify(row);
+        if (rowSignatures.has(sig)) duplicateRows++;
+        else rowSignatures.add(sig);
+      }
+
+      // Build canonical maps for consistency scoring
+      const normMaps = new Map<string, Map<string, string>>();
       for (const col of stringColumns) {
-        const seen = new Map<string, string>(); // normalized -> first actual
-        for (const row of sampleData) {
+        const seen = new Map<string, string>();
+        for (const row of qualitySample) {
           const val = String(row[col] ?? "").trim();
           const norm = val.toLowerCase().replace(/\s+/g, " ");
           if (!seen.has(norm)) seen.set(norm, val);
         }
         const actMap = new Map<string, string>();
-        for (const row of sampleData) {
+        for (const row of qualitySample) {
           const val = String(row[col] ?? "").trim();
           const norm = val.toLowerCase().replace(/\s+/g, " ");
           actMap.set(val, seen.get(norm)!);
         }
         normMaps.set(col, actMap);
-        canonicalMaps.set(col, actMap);
       }
 
-      // main single-pass
-      for (const row of sampleData) {
-        const sig = JSON.stringify(row);
-        if (rowSignatures.has(sig)) duplicateRows++;
-        else rowSignatures.add(sig);
+      // Single completeness + consistency pass
+      for (const row of qualitySample) {
         for (const col of columns) {
           totalCells++;
           const v = row[col];
@@ -294,8 +298,8 @@ export async function registerRoutes(
       }
 
       const completenessScore = totalCells > 0 ? filledCells / totalCells : 0;
-      const duplicationScore = duplicateRows > 0 ? Math.max(0, 1 - (duplicateRows / sampleData.length)) : 1.0;
-      const consistencyScore = inconsistentRecords > 0 ? Math.max(0.1, 1 - (inconsistentRecords / Math.max(1, sampleData.length * 0.5))) : 1.0;
+      const duplicationScore = duplicateRows > 0 ? Math.max(0, 1 - (duplicateRows / dedupSample.length)) : 1.0;
+      const consistencyScore = inconsistentRecords > 0 ? Math.max(0.1, 1 - (inconsistentRecords / Math.max(1, qualitySample.length * 0.5))) : 1.0;
       const qualityScore = Math.max(0, Math.min(1, completenessScore * 0.4 + duplicationScore * 0.35 + consistencyScore * 0.25));
 
       const dataset = await storage.createDataset({
@@ -310,8 +314,10 @@ export async function registerRoutes(
         completenessScore,
         consistencyScore: consistencyScore || 0.9,
         validityScore: 0.85,
-        data,
       });
+
+      // Store rows in chunks to avoid MongoDB 16 MB document limit
+      await storage.storeDataChunks(dataset.id, data);
 
       await storage.createActivityLog({
         userId: req.user!.id,
@@ -346,7 +352,7 @@ export async function registerRoutes(
       if (!dataset) {
         return res.status(404).send("Dataset not found");
       }
-      const data = dataset.data as any[];
+      const data = await storage.getDatasetData(dataset.id);
       res.json({
         columns: dataset.columns,
         rows: data.slice(0, 100),
@@ -363,7 +369,7 @@ export async function registerRoutes(
         return res.status(404).send("Dataset not found");
       }
 
-      let data = (dataset.data as any[]) || [];
+      let data = await storage.getDatasetData(dataset.id);
       const columns = dataset.columns || [];
       const fixes: string[] = [];
 
@@ -444,9 +450,9 @@ export async function registerRoutes(
 
       const newCompletenessScore = totalCells > 0 ? filledCells / totalCells : 0;
       
-      // Update dataset with fixed data
+      // Update dataset metadata and replace chunks with fixed data
+      await storage.replaceDataChunks(dataset.id, data);
       const updatedDataset = await storage.updateDataset(dataset.id, {
-        data,
         qualityScore: Math.min(0.99, newCompletenessScore + 0.1),
         completenessScore: newCompletenessScore,
       });
@@ -494,7 +500,7 @@ export async function registerRoutes(
         return res.status(404).send("Dataset not found");
       }
 
-      const data = dataset.data as any[];
+      const data = await storage.getDatasetData(datasetId);
 
       // Use proper academic risk calculation with NISTIR 8053 methodology
       const riskMetrics = calculateRiskMetrics(
@@ -678,7 +684,7 @@ export async function registerRoutes(
         return res.status(404).send("Dataset not found");
       }
 
-      const data = dataset.data as any[];
+      const data = await storage.getDatasetData(datasetId);
       const { 
         processedData, 
         recordsSuppressed, 
@@ -731,7 +737,7 @@ export async function registerRoutes(
         return res.status(404).send("Dataset not found");
       }
 
-      const data = dataset.data as any[];
+      const data = await storage.getDatasetData(datasetId);
       const { 
         processedData, 
         recordsSuppressed, 
@@ -788,7 +794,7 @@ export async function registerRoutes(
         return res.status(404).send("Dataset not found");
       }
 
-      const data = dataset.data as any[];
+      const data = await storage.getDatasetData(datasetId);
       const { processedData, recordsSuppressed, informationLoss, satisfyingClasses, violatingClasses, avgDistance, maxDistance } = applyTCloseness(
         data,
         quasiIdentifiers,
@@ -823,7 +829,7 @@ export async function registerRoutes(
         return res.status(404).send("Dataset not found");
       }
 
-      const data = dataset.data as any[];
+      const data = await storage.getDatasetData(datasetId);
       const numericColumns = dataset.columns?.filter((col) => {
         return data.length > 0 && typeof data[0][col] === "number";
       }) || [];
@@ -856,7 +862,7 @@ export async function registerRoutes(
         return res.status(404).send("Dataset not found");
       }
 
-      const data = dataset.data as any[];
+      const data = await storage.getDatasetData(datasetId);
       const targetSize = Math.floor(data.length * (sampleSize / 100));
       
       // Simple synthetic data generation
@@ -933,7 +939,7 @@ export async function registerRoutes(
         return res.status(404).send("Dataset or operation not found");
       }
 
-      const originalData = (originalDataset.data as any[]) || [];
+      const originalData = await storage.getDatasetData(originalDatasetId);
       const processedData = (operation.processedData as any[]) || [];
 
       if (!originalData.length) {
