@@ -9,8 +9,16 @@ import { v4 as uuidv4 } from "uuid";
 import { calculateRiskMetrics, getRiskLevel } from "./risk-utils";
 import { applyLDiversityDistinct, applyTCloseness, applyKAnonymityEnhanced } from "./privacy-utils";
 import { computeUtilityMetrics, getGrade } from "./utility-compute";
+import os from "os";
+import fs from "fs";
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Disk storage — no memory limit, handles files of any size
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (_req, file, cb) => cb(null, uuidv4() + "-" + file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")),
+  }),
+});
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.isAuthenticated()) {
@@ -220,8 +228,9 @@ export async function registerRoutes(
   });
 
   app.post("/api/data/upload", requireAuth, upload.single("file"), async (req, res) => {
+    const tmpPath = (req.file as any)?.path as string | undefined;
     try {
-      if (!req.file) {
+      if (!req.file || !tmpPath) {
         return res.status(400).send("No file uploaded");
       }
 
@@ -231,105 +240,72 @@ export async function registerRoutes(
       let columns: string[] = [];
 
       if (extension === "csv") {
-        const csvString = file.buffer.toString("utf-8");
+        const csvString = fs.readFileSync(tmpPath, "utf-8");
         const parsed = Papa.parse(csvString, { header: true, skipEmptyLines: true });
         data = parsed.data as any[];
         columns = parsed.meta.fields || [];
       } else if (extension === "xlsx" || extension === "xls") {
-        const workbook = XLSX.read(file.buffer, { type: "buffer" });
+        const buf = fs.readFileSync(tmpPath);
+        const workbook = XLSX.read(buf, { type: "buffer" });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         data = XLSX.utils.sheet_to_json(sheet);
-        if (data.length > 0) {
-          columns = Object.keys(data[0]);
-        }
+        if (data.length > 0) columns = Object.keys(data[0]);
       } else if (extension === "json") {
-        data = JSON.parse(file.buffer.toString("utf-8"));
-        if (Array.isArray(data) && data.length > 0) {
-          columns = Object.keys(data[0]);
-        }
+        data = JSON.parse(fs.readFileSync(tmpPath, "utf-8"));
+        if (Array.isArray(data) && data.length > 0) columns = Object.keys(data[0]);
       } else {
         return res.status(400).send("Unsupported file format");
       }
 
-      // Calculate comprehensive quality scores
-      let totalCells = 0;
-      let filledCells = 0;
-      let duplicateRows = 0;
-      
-      // Check completeness
-      data.forEach((row) => {
-        columns.forEach((col) => {
-          totalCells++;
-          if (row[col] !== null && row[col] !== undefined && row[col] !== "") {
-            filledCells++;
-          }
-        });
-      });
+      // Single-pass quality scoring (efficient for large datasets)
+      const SAMPLE_LIMIT = 200_000; // sample cap for quality computation on huge files
+      const sampleData = data.length > SAMPLE_LIMIT ? data.slice(0, SAMPLE_LIMIT) : data;
+      const stringColumns = columns.filter(col => sampleData.length > 0 && typeof sampleData[0][col] === "string");
 
-      // Check for exact duplicate rows
+      let totalCells = 0, filledCells = 0, duplicateRows = 0, inconsistentRecords = 0;
       const rowSignatures = new Set<string>();
-      data.forEach((row) => {
-        const sig = JSON.stringify(row);
-        if (rowSignatures.has(sig)) {
-          duplicateRows++;
+      // col -> normalized -> first-seen canonical
+      const canonicalMaps = new Map<string, Map<string, string>>();
+      // first pass: build canonical maps
+      const normMaps = new Map<string, Map<string, string>>(); // col -> actual -> canonical
+      for (const col of stringColumns) {
+        const seen = new Map<string, string>(); // normalized -> first actual
+        for (const row of sampleData) {
+          const val = String(row[col] ?? "").trim();
+          const norm = val.toLowerCase().replace(/\s+/g, " ");
+          if (!seen.has(norm)) seen.set(norm, val);
         }
-        rowSignatures.add(sig);
-      });
+        const actMap = new Map<string, string>();
+        for (const row of sampleData) {
+          const val = String(row[col] ?? "").trim();
+          const norm = val.toLowerCase().replace(/\s+/g, " ");
+          actMap.set(val, seen.get(norm)!);
+        }
+        normMaps.set(col, actMap);
+        canonicalMaps.set(col, actMap);
+      }
 
-      // Check for consistency issues (case variations, spacing, abbreviations)
-      const stringColumns = columns.filter((col) => {
-        return data.length > 0 && typeof data[0][col] === "string";
-      });
+      // main single-pass
+      for (const row of sampleData) {
+        const sig = JSON.stringify(row);
+        if (rowSignatures.has(sig)) duplicateRows++;
+        else rowSignatures.add(sig);
+        for (const col of columns) {
+          totalCells++;
+          const v = row[col];
+          if (v !== null && v !== undefined && v !== "") filledCells++;
+        }
+        for (const col of stringColumns) {
+          const val = String(row[col] ?? "").trim();
+          const canonical = normMaps.get(col)?.get(val);
+          if (canonical && val !== canonical) inconsistentRecords++;
+        }
+      }
 
-      let inconsistentRecords = 0;
-      const valueNormalizationMap = new Map<string, Map<string, string>>(); // col -> (actual -> canonical)
-      
-      stringColumns.forEach((col) => {
-        const valueMap = new Map<string, Set<string>>(); // Normalized -> Set of actual values
-        const colValues: string[] = [];
-        
-        data.forEach((row) => {
-          const val = String(row[col] || "").trim();
-          colValues.push(val);
-          
-          // Normalize: lowercase and remove extra spaces
-          const normalized = val.toLowerCase().replace(/\s+/g, " ");
-          
-          if (!valueMap.has(normalized)) {
-            valueMap.set(normalized, new Set());
-          }
-          valueMap.get(normalized)!.add(val);
-        });
-
-        // Build canonical mapping for this column
-        const canonicalMap = new Map<string, string>();
-        valueMap.forEach((variations, normalized) => {
-          // Pick the first variation as canonical (usually the most common)
-          const canonical = Array.from(variations)[0];
-          variations.forEach((variation) => {
-            canonicalMap.set(variation, canonical);
-          });
-        });
-        
-        valueNormalizationMap.set(col, canonicalMap);
-
-        // Count inconsistent records: any record with non-canonical casing/spacing
-        data.forEach((row) => {
-          const val = String(row[col] || "").trim();
-          const canonical = canonicalMap.get(val);
-          if (canonical && val !== canonical) {
-            inconsistentRecords++;
-          }
-        });
-      });
-
-      // Calculate individual scores (0 to 1)
       const completenessScore = totalCells > 0 ? filledCells / totalCells : 0;
-      const duplicationScore = duplicateRows > 0 ? Math.max(0, 1 - (duplicateRows / data.length)) : 1.0;
-      const consistencyScore = inconsistentRecords > 0 ? Math.max(0.1, 1 - (inconsistentRecords / Math.max(1, data.length * 0.5))) : 1.0;
-      
-      // Weighted quality score (0 to 1)
+      const duplicationScore = duplicateRows > 0 ? Math.max(0, 1 - (duplicateRows / sampleData.length)) : 1.0;
+      const consistencyScore = inconsistentRecords > 0 ? Math.max(0.1, 1 - (inconsistentRecords / Math.max(1, sampleData.length * 0.5))) : 1.0;
       const qualityScore = Math.max(0, Math.min(1, completenessScore * 0.4 + duplicationScore * 0.35 + consistencyScore * 0.25));
 
       const dataset = await storage.createDataset({
@@ -359,6 +335,9 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Upload error:", error);
       res.status(500).send("Failed to process file");
+    } finally {
+      // Always clean up temp file
+      if (tmpPath) try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     }
   });
 
